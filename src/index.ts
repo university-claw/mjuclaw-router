@@ -2,6 +2,7 @@ import { loadConfig } from "./config.js";
 import { createDiscordClient } from "./discord/client.js";
 import { registerMessageHandlers } from "./discord/handlers.js";
 import { registerInteractionHandlers } from "./discord/interaction.js";
+import { ensureOpenClawClientConfig } from "./forward/bootstrap.js";
 import { OpenClawForwarder } from "./forward/openclaw.js";
 import { createHttpServer } from "./http/server.js";
 import { createLogger } from "./logger.js";
@@ -20,6 +21,10 @@ async function main() {
     },
     "mjuclaw-router 시작"
   );
+
+  // openclaw CLI가 forward 시 사용할 ~/.openclaw/openclaw.json 부트스트랩.
+  // gateway.mode=remote로 mjuclaw-agent 게이트웨이에 붙는다.
+  await ensureOpenClawClientConfig(config, logger);
 
   const status = new OnboardingStatusChecker(config, logger);
   const loginRunner = new OnboardingLoginRunner(config, logger);

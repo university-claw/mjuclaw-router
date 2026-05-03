@@ -24,6 +24,9 @@ export class OpenClawForwarder {
     message: string;
     sessionLabel?: string;
   }): Promise<ForwardResult> {
+    // gateway URL/token은 startup에서 ~/.openclaw/openclaw.json (gateway.remote)
+    // 으로 부트스트랩되어 있으므로 CLI에 따로 넘기지 않는다 (`openclaw agent`는
+    // --url/--token 옵션을 받지 않는다).
     const args = [
       "agent",
       "--to",
@@ -34,13 +37,6 @@ export class OpenClawForwarder {
       params.message,
       "--json",
     ];
-
-    if (this.config.OPENCLAW_GATEWAY_URL) {
-      args.unshift("--url", this.config.OPENCLAW_GATEWAY_URL);
-    }
-    if (this.config.OPENCLAW_GATEWAY_TOKEN) {
-      args.unshift("--token", this.config.OPENCLAW_GATEWAY_TOKEN);
-    }
 
     try {
       const { stdout, stderr, exitCode } = await execa(
