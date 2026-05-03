@@ -50,9 +50,13 @@ RUN printf '#!/bin/bash\nexec node /opt/mju-cli/dist/main.js "$@"\n' > /usr/loca
 
 # 비루트 사용자 (uid 999는 mjuclaw-agent의 agent 유저와 일치 — 공유 user-data 볼륨
 # 권한 매칭용). mju-cli vault 디렉토리 쓰기 권한이 router에도 있어야 한다.
+# /home/router/.openclaw는 named volume 마운트 포인트로 사용되며, 이미지에 미리
+# 만들어 두면 named volume 첫 생성 시 권한이 그대로 보존된다.
 RUN groupadd --system --gid 999 router \
     && useradd --system --uid 999 --gid router --create-home router \
-    && chown -R router:router /app /opt/mju-cli
+    && mkdir -p /home/router/.openclaw \
+    && chown -R router:router /app /opt/mju-cli /home/router/.openclaw \
+    && chmod 700 /home/router/.openclaw
 
 USER router
 
