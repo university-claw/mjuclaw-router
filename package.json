@@ -1,0 +1,31 @@
+{
+  "name": "mjuclaw-router",
+  "version": "0.1.0",
+  "description": "Discord WS 라우터 — OpenClaw 앞단에서 100% rule-base 온보딩 게이트와 LLM 포워딩을 담당한다.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "execa": "^9.5.2",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "license": "MIT"
+}
