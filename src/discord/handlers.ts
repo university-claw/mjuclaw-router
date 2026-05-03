@@ -1,5 +1,9 @@
 import { ChannelType, type Client, type Message } from "discord.js";
 
+import {
+  ABUSE_REFUSAL_TEXT,
+  type IntentClassifierClient,
+} from "../classifier/client.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
 import type { OpenClawForwarder } from "../forward/openclaw.js";
@@ -12,10 +16,11 @@ export type HandlerDeps = {
   logger: Logger;
   status: OnboardingStatusChecker;
   forwarder: OpenClawForwarder;
+  classifier: IntentClassifierClient;
 };
 
 export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
-  const { logger, config, status, forwarder } = deps;
+  const { logger, config, status, forwarder, classifier } = deps;
 
   client.on("messageCreate", async (message) => {
     try {
@@ -36,7 +41,35 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
         return;
       }
 
-      // 온보딩 완료된 사용자 → openclaw로 forward
+      // ── Intent classifier 게이트 (MVP-2) ──────────────────────
+      // 활성화된 경우에만 호출. abuse면 LLM 0회로 정형 거절. 분류 실패 시
+      // fail-open: 정상 forward로 진행 (사용자 경험 유지 우선).
+      if (classifier.enabled) {
+        const outcome = await classifier.classify(message.content);
+        if (outcome.ok) {
+          logger.info(
+            {
+              userId,
+              final: outcome.result.final,
+              pAbuse: outcome.result.pAbuse,
+              overridden: outcome.result.overriddenToAbuse,
+              latencyMs: outcome.result.latencyMs,
+            },
+            "intent classified"
+          );
+          if (outcome.result.final === "abuse") {
+            await reply(ABUSE_REFUSAL_TEXT);
+            return;
+          }
+        } else {
+          logger.warn(
+            { userId, reason: outcome.reason },
+            "classifier 호출 실패 — fail-open으로 forward 진행"
+          );
+        }
+      }
+
+      // 온보딩 완료 + (필요 시) 분류 통과 사용자 → openclaw로 forward
       const channel = message.channel;
       const sendTyping =
         "sendTyping" in channel ? channel.sendTyping.bind(channel) : null;
