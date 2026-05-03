@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added — MVP-2: Intent classifier 게이트 (abuse 차단)
+
+- `src/classifier/client.ts` — mjuclaw-intent-serving HTTP 클라이언트.
+  - `POST /classify` 호출, Bearer 인증, `AbortController` 기반 timeout.
+  - top-3 결과 + `overriddenToAbuse` 플래그 + `pAbuse` 노출.
+- `src/discord/handlers.ts` — onboarding 통과 후 forward 직전에 classifier 호출.
+  - `final == "abuse"` → 정형 거절 응답으로 LLM 호출 0회.
+  - 분류 실패(timeout/HTTP 오류) → fail-open으로 forward 진행 (사용자 경험 우선).
+- 환경 변수: `CLASSIFIER_ENABLED`(기본 false), `CLASSIFIER_URL`,
+  `CLASSIFIER_AUTH_TOKEN`, `CLASSIFIER_TIMEOUT_MS`(기본 2500ms).
+
 ### Added — HTTP send endpoint + Dockerfile 마무리
 
 - `POST /discord/send` HTTP 엔드포인트 (`Authorization: Bearer ...`).

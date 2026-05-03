@@ -16,6 +16,16 @@ const ConfigSchema = z.object({
   HTTP_AUTH_TOKEN: z
     .string()
     .min(16, "HTTP_AUTH_TOKEN must be at least 16 chars (recommend openssl rand -hex 32)"),
+  // ── Intent classifier (MVP-2) ────────────────────────────────
+  // mjuclaw-intent-serving HTTP를 호출해 abuse 차단 + (향후) service 라우팅 분기.
+  // 비활성화 시 router는 모든 onboarded 메시지를 그대로 forward (MVP-1 동작).
+  CLASSIFIER_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .transform((v) => (typeof v === "boolean" ? v : /^(1|true|yes|on)$/i.test(v)))
+    .default(false),
+  CLASSIFIER_URL: z.string().default(""),
+  CLASSIFIER_AUTH_TOKEN: z.string().default(""),
+  CLASSIFIER_TIMEOUT_MS: z.coerce.number().int().positive().default(2500),
   LOG_LEVEL: z
     .enum(["trace", "debug", "info", "warn", "error", "fatal"])
     .default("info"),
