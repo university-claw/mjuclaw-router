@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Added — HTTP send endpoint + Dockerfile 마무리
+
+- `POST /discord/send` HTTP 엔드포인트 (`Authorization: Bearer ...`).
+  - body `{ discordUserId, content }` → router가 자기 봇으로 DM 전송 후 200/502 응답.
+  - mjuclaw-setup의 `bin/mju-news-alert`/`bin/mju-attendance-alert`가 OpenClaw discord 채널 비활성화 이후 router로 위임하기 위한 우회 경로.
+- `GET /healthz` (인증 없이) — Discord ready 여부 노출.
+- `HTTP_PORT`/`HTTP_BIND_HOST`/`HTTP_AUTH_TOKEN` 환경 변수.
+- Dockerfile multi-stage 완성: stage 1 mju-cli 빌드(additional context), stage 2 router 빌드, stage 3 runtime + openclaw CLI + slim `mju` 래퍼.
+
 ### Added — MVP-1 scaffolding
 
 - 신규 레포 `mjuclaw-router` 초기화 (Node 22, TypeScript ESM, NodeNext).

@@ -3,6 +3,7 @@ import { createDiscordClient } from "./discord/client.js";
 import { registerMessageHandlers } from "./discord/handlers.js";
 import { registerInteractionHandlers } from "./discord/interaction.js";
 import { OpenClawForwarder } from "./forward/openclaw.js";
+import { createHttpServer } from "./http/server.js";
 import { createLogger } from "./logger.js";
 import { OnboardingLoginRunner } from "./onboarding/login.js";
 import { OnboardingStatusChecker } from "./onboarding/status.js";
@@ -15,6 +16,7 @@ async function main() {
     {
       gatewayUrl: config.OPENCLAW_GATEWAY_URL,
       userDataRoot: config.USER_DATA_ROOT,
+      httpPort: config.HTTP_PORT,
     },
     "mjuclaw-router 시작"
   );
@@ -27,8 +29,23 @@ async function main() {
   registerMessageHandlers(client, { config, logger, status, forwarder });
   registerInteractionHandlers(client, { logger, loginRunner });
 
+  const httpServer = createHttpServer({
+    port: config.HTTP_PORT,
+    bindHost: config.HTTP_BIND_HOST,
+    authToken: config.HTTP_AUTH_TOKEN,
+    client,
+    logger,
+  });
+
   const shutdown = async (signal: string) => {
-    logger.info({ signal }, "shutdown 신호 수신, Discord 클라이언트 종료");
+    logger.info({ signal }, "shutdown 신호 수신, Discord/HTTP 종료");
+    try {
+      await new Promise<void>((resolve) =>
+        httpServer.close(() => resolve())
+      );
+    } catch (err) {
+      logger.error({ err }, "HTTP 서버 종료 중 오류");
+    }
     try {
       await client.destroy();
     } catch (err) {

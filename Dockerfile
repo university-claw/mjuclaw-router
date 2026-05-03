@@ -1,7 +1,28 @@
 # mjuclaw-router — OpenClaw 앞단의 Discord WS 라우터.
-# 100% rule-base 온보딩 게이트 + LLM 응답 forward를 담당.
-FROM node:22-slim AS base
+# 100% rule-base 온보딩 게이트 + LLM 응답 forward + cron alert 우회용 HTTP 서버.
+#
+# 빌드 시 `mju-cli` 소스가 필요하므로 docker buildx의 additional_contexts로
+# 외부에서 주입한다 (compose 측 build.additional_contexts 설정 참고).
 
+# ── stage 1: mju-cli 빌드 ───────────────────────────────────────
+FROM node:22-slim AS mju-cli-build
+WORKDIR /opt/mju-cli
+COPY --from=mju-cli package.json package-lock.json ./
+RUN npm ci --include=dev
+COPY --from=mju-cli . ./
+RUN npx tsc && npm prune --omit=dev
+
+# ── stage 2: router 빌드 ────────────────────────────────────────
+FROM node:22-slim AS router-build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
+COPY tsconfig.json ./
+COPY src ./src
+RUN npx tsc -p tsconfig.json && npm prune --omit=dev
+
+# ── stage 3: runtime ────────────────────────────────────────────
+FROM node:22-slim AS runtime
 ENV NODE_ENV=production \
     NPM_CONFIG_FUND=false \
     NPM_CONFIG_AUDIT=false
@@ -10,40 +31,37 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
-# ── mju-cli 번들 (subprocess 호출용) ──────────────────────────────
-# 빌드 컨텍스트 루트 외부 경로를 쓰지 않기 위해 build 시점에 mju-cli/dist를
-# `mjuclaw-setup` 패턴과 동일하게 외부에서 별도 COPY 하도록 한다. 자세한 빌드
-# 가이드는 README.md 참고.
-WORKDIR /opt/mju-cli
-# COPY mju-cli/ /opt/mju-cli/   ← 실제 빌드 시 setup 레포에서 이 단계를 추가하거나,
-# multi-context build로 별도 sibling 디렉토리에서 가져옴.
-
-# ── openclaw CLI ────────────────────────────────────────────────
-# 가장 가벼운 통합: gateway WS endpoint를 향해 `openclaw agent --json`만 호출하면 되므로
-# CLI 패키지를 글로벌 설치한다. mjuclaw-setup의 mju-cli 빌드와 동일한 npm 레지스트리 가정.
-RUN npm install -g openclaw@^2026.4.11 \
+# OpenClaw CLI — router가 `openclaw agent --json`을 subprocess로 호출해
+# mjuclaw-agent 컨테이너의 gateway에 forward하는 용도.
+RUN npm install -g openclaw@2026.4.11 \
     && openclaw --version
 
-# ── router 본체 ─────────────────────────────────────────────────
 WORKDIR /app
+COPY --from=mju-cli-build /opt/mju-cli /opt/mju-cli
+COPY --from=router-build /app/node_modules ./node_modules
+COPY --from=router-build /app/dist ./dist
+COPY package.json ./
 
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
+# 슬림 mju 래퍼 — agent의 view-server 의존 래퍼와 달리 router는 view 자동 POST가
+# 필요 없으므로 단순 forwarder만 둔다 (mju-cli main entry는 shebang이 없어서
+# `node` prefix 필수).
+RUN printf '#!/bin/bash\nexec node /opt/mju-cli/dist/main.js "$@"\n' > /usr/local/bin/mju \
+    && chmod +x /usr/local/bin/mju
 
-COPY tsconfig.json ./
-COPY src ./src
-RUN npm install --include=dev typescript \
-    && npx tsc -p tsconfig.json \
-    && npm prune --omit=dev
-
-# 비루트 사용자
+# 비루트 사용자 (uid 999는 mjuclaw-agent의 agent 유저와 일치 — 공유 user-data 볼륨
+# 권한 매칭용). mju-cli vault 디렉토리 쓰기 권한이 router에도 있어야 한다.
 RUN groupadd --system --gid 999 router \
     && useradd --system --uid 999 --gid router --create-home router \
-    && chown -R router:router /app
+    && chown -R router:router /app /opt/mju-cli
+
 USER router
 
 ENV LOG_LEVEL=info \
     USER_DATA_ROOT=/data/users \
-    OPENCLAW_GATEWAY_URL=ws://mjuclaw-agent:18789
+    OPENCLAW_GATEWAY_URL=ws://mjuclaw-agent:18789 \
+    HTTP_PORT=3100 \
+    HTTP_BIND_HOST=0.0.0.0
+
+EXPOSE 3100
 
 ENTRYPOINT ["/usr/bin/tini", "--", "node", "dist/index.js"]
