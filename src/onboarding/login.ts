@@ -44,6 +44,12 @@ export class OnboardingLoginRunner {
       const parsed = this.tryParseJson(stdout);
 
       if (exitCode === 0) {
+        // 온보딩 후속 부가 효과 (출석 알림 cron 등록 + 공지 알림 설문 Poll 2건 발사)
+        // 트리거. fire-and-forget — login 응답 latency를 늘리지 않는다. agent의
+        // view-server가 60초 timeout 안에서 mju-attendance-alert subscribe +
+        // mju-onboarding-survey start 를 실행하고, helper들은 router HTTP로 Discord
+        // 작업을 다시 위임한다 (agent는 Discord 토큰을 갖지 않으므로 직접 호출 불가).
+        void this.triggerPostLogin(discordUserId);
         return { ok: true, raw: parsed ?? stdout };
       }
 
@@ -65,6 +71,43 @@ export class OnboardingLoginRunner {
         ok: false,
         reason: "로그인 처리 중 예외가 발생했습니다.",
       };
+    }
+  }
+
+  // agent view-server의 /internal/onboarding-postlogin 호출. 실패해도 login 자체는
+  // 성공 응답이 이미 나갔으므로 logger.warn 만 남기고 swallow.
+  private async triggerPostLogin(discordUserId: string): Promise<void> {
+    const url = `${this.config.VIEW_SERVER_URL}/internal/onboarding-postlogin`;
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.HTTP_AUTH_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ discordUserId }),
+        // helper 60s timeout + 안전 마진. agent가 죽었거나 view-server 미응답이면
+        // 90초 후 abort.
+        signal: AbortSignal.timeout(90_000),
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        this.logger.warn(
+          { discordUserId, status: res.status, body: text.slice(0, 500) },
+          "post-login 트리거 비-200 응답"
+        );
+        return;
+      }
+      const json = (await res.json().catch(() => null)) as unknown;
+      this.logger.info(
+        { discordUserId, result: json },
+        "post-login 트리거 완료"
+      );
+    } catch (err) {
+      this.logger.warn(
+        { discordUserId, err: String(err) },
+        "post-login 트리거 호출 예외"
+      );
     }
   }
 

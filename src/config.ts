@@ -16,6 +16,10 @@ const ConfigSchema = z.object({
   HTTP_AUTH_TOKEN: z
     .string()
     .min(16, "HTTP_AUTH_TOKEN must be at least 16 chars (recommend openssl rand -hex 32)"),
+  // 온보딩 후속 트리거 — agent 측 view-server의 /internal/onboarding-postlogin 호출.
+  // mju auth login 성공 직후 출석 알림 cron + 공지 알림 설문 Poll 등록을 위임한다.
+  // Bearer 토큰은 HTTP_AUTH_TOKEN을 재사용 (router/agent 양쪽 env에 같은 값으로 주입).
+  VIEW_SERVER_URL: z.string().min(1).default("http://mjuclaw-agent:3001"),
   // ── Intent classifier (MVP-2) ────────────────────────────────
   // mjuclaw-intent-serving HTTP를 호출해 abuse 차단 + (향후) service 라우팅 분기.
   // 비활성화 시 router는 모든 onboarded 메시지를 그대로 forward (MVP-1 동작).
