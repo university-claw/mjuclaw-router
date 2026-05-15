@@ -30,6 +30,17 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
       const userId = message.author.id;
       const reply = message.reply.bind(message);
 
+      logger.info(
+        {
+          userId,
+          messageId: message.id,
+          channelId: message.channelId,
+          guildId: message.guildId,
+          contentLength: message.content.length,
+        },
+        "discord 사용자 원문 메시지 수신"
+      );
+
       const onboard = await status.check(userId);
       logger.debug(
         { userId, authenticated: onboard.authenticated },

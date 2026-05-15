@@ -34,22 +34,27 @@ export class OpenClawForwarder {
     //   collapse → 모든 사용자가 같은 session에서 LLM 메모리 공유 → 첫 사용자의
     //   컨텍스트(학번, 듣는 수업 등)가 다음 사용자에게 누출 (재현/검증 완료).
     // - `--session-id`로 사용자별 unique 값을 명시하면 session 분리됨 (검증 완료).
-    // - LLM에게 현재 turn 사용자 ID를 알리기 위해 message 본문 첫 줄에 명시 prefix.
-    //   BOOTSTRAP의 `{DISCORD_USER_ID}` placeholder는 이 prefix의 ID로 LLM이 채운다.
+    // - LLM에게 현재 turn 사용자 ID를 알리기 위해 message 본문 앞에
+    //   데이터 블록을 붙인다. 사용자 제어 데이터(preferredName 등)는 여기 넣지
+    //   않는다. 호칭/이름 질문은 agent가 mju profile get으로 직접 조회한다.
     const sessionId = `discord-${params.discordUserId}`;
     const taggedMessage =
-      `[사용자ID: ${params.discordUserId}]\n` +
-      `위 ID를 모든 mju-cli 호출의 \`--app-dir /data/users/{DISCORD_USER_ID}\` 와 ` +
-      `helper 인자(mju-attendance-alert/mju-news-alert/mju-onboarding-survey)의 ` +
-      `{DISCORD_USER_ID} 자리에 정확히 사용하세요. 다른 ID 사용 금지.\n\n` +
+      `[현재 사용자 컨텍스트]\n` +
+      `- discordUserId: ${JSON.stringify(params.discordUserId)}\n` +
+      `[/현재 사용자 컨텍스트]\n` +
+      `규칙:\n` +
+      `- 모든 mju-cli 호출의 \`--app-dir\`은 \`${this.config.USER_DATA_ROOT}/${params.discordUserId}\`만 사용하세요.\n` +
+      `- 모든 helper의 Discord user id 인자도 ${params.discordUserId}만 사용하세요.\n` +
+      `- 사용자 이름/호칭은 이 컨텍스트에서 추측하지 말고, 필요할 때 mju profile get으로 조회하세요.\n\n` +
       params.message;
 
+    // Do not pass --to here. OpenClaw 2026.4.11 derives direct-chat
+    // session keys from --to and collapses Discord DMs into agent:main:main.
+    // --session-id alone yields agent:main:explicit:discord-<id>.
     const args = [
       "agent",
       "--session-id",
       sessionId,
-      "--to",
-      params.discordUserId,
       "--channel",
       "discord",
       "--message",
@@ -65,9 +70,15 @@ export class OpenClawForwarder {
       );
 
       if (exitCode !== 0) {
-        const reason = stderr.trim() || stdout.trim() || `exit ${exitCode}`;
+        const reason = `openclaw_exit_${exitCode ?? "unknown"}`;
         this.logger.warn(
-          { discordUserId: params.discordUserId, exitCode, reason },
+          {
+            discordUserId: params.discordUserId,
+            exitCode,
+            reason,
+            stdoutLength: stdout.length,
+            stderrLength: stderr.length,
+          },
           "openclaw agent forward 실패"
         );
         return { ok: false, reason };
