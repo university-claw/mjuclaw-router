@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - dev
 
 permissions:
   contents: read
@@ -33,3 +34,29 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check out mju-cli build context
+        uses: actions/checkout@v4
+        with:
+          repository: university-claw/mju-cli
+          ref: main
+          path: mju-cli
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        run: |
+          docker buildx build --load \
+            --build-context mju-cli=./mju-cli \
+            -t mjuclaw-router:test .
