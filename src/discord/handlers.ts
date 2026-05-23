@@ -7,7 +7,7 @@ import {
 import { matchAbuseHeuristic } from "../classifier/heuristic.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
-import type { OpenClawForwarder } from "../forward/openclaw.js";
+import type { MjuClawAgentForwarder } from "../forward/agent.js";
 import { buildOnboardingPrompt } from "../onboarding/modal.js";
 import type { OnboardingStatusChecker } from "../onboarding/status.js";
 import { chunkForDiscord } from "./chunk.js";
@@ -16,7 +16,7 @@ export type HandlerDeps = {
   config: Config;
   logger: Logger;
   status: OnboardingStatusChecker;
-  forwarder: OpenClawForwarder;
+  forwarder: MjuClawAgentForwarder;
   classifier: IntentClassifierClient;
 };
 
@@ -25,7 +25,7 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
 
   client.on("messageCreate", async (message) => {
     try {
-      if (!shouldHandle(message, client, config)) return;
+      if (!shouldHandle(message, config)) return;
 
       const userId = message.author.id;
       const reply = message.reply.bind(message);
@@ -116,7 +116,7 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
         return;
       }
 
-      // 온보딩 완료 + (필요 시) 분류 통과 사용자 → openclaw로 forward
+      // 온보딩 완료 + (필요 시) 분류 통과 사용자 → mjuclaw-agent로 forward
       const channel = message.channel;
       const sendTyping =
         "sendTyping" in channel ? channel.sendTyping.bind(channel) : null;
@@ -124,7 +124,9 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
 
       const result = await forwarder.forward({
         discordUserId: userId,
-        message: message.content,
+        messageId: message.id,
+        messageText: message.content,
+        channelType: "dm",
       });
 
       if (!result.ok) {
@@ -153,24 +155,15 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
   });
 }
 
-function shouldHandle(message: Message, client: Client, config: Config): boolean {
+function shouldHandle(message: Message, config: Config): boolean {
   if (message.author.bot) return false;
   if (!message.content || message.content.trim().length === 0) return false;
 
   const channelType = message.channel.type;
   const isDm = channelType === ChannelType.DM;
-  const isGuildText =
-    channelType === ChannelType.GuildText ||
-    channelType === ChannelType.PublicThread ||
-    channelType === ChannelType.PrivateThread;
-
   if (config.DISCORD_GUILD_ID && message.guildId) {
     if (message.guildId !== config.DISCORD_GUILD_ID) return false;
   }
 
-  if (isDm) return true;
-  if (isGuildText && client.user && message.mentions.has(client.user.id)) {
-    return true;
-  }
-  return false;
+  return isDm;
 }

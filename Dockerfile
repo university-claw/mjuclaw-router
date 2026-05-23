@@ -1,4 +1,4 @@
-# mjuclaw-router — OpenClaw 앞단의 Discord WS 라우터.
+# mjuclaw-router — mjuclaw-agent 앞단의 Discord WS 라우터.
 # 100% rule-base 온보딩 게이트 + LLM 응답 forward + cron alert 우회용 HTTP 서버.
 #
 # 빌드 시 `mju-cli` 소스가 필요하므로 docker buildx의 additional_contexts로
@@ -31,11 +31,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
-# OpenClaw CLI — router가 `openclaw agent --json`을 subprocess로 호출해
-# mjuclaw-agent 컨테이너의 gateway에 forward하는 용도.
-RUN npm install -g openclaw@2026.4.11 \
-    && openclaw --version
-
 WORKDIR /app
 COPY --from=mju-cli-build /opt/mju-cli /opt/mju-cli
 COPY --from=router-build /app/node_modules ./node_modules
@@ -50,19 +45,16 @@ RUN printf '#!/bin/bash\nexec node /opt/mju-cli/dist/main.js "$@"\n' > /usr/loca
 
 # 비루트 사용자 (uid 999는 mjuclaw-agent의 agent 유저와 일치 — 공유 user-data 볼륨
 # 권한 매칭용). mju-cli vault 디렉토리 쓰기 권한이 router에도 있어야 한다.
-# /home/router/.openclaw는 named volume 마운트 포인트로 사용되며, 이미지에 미리
-# 만들어 두면 named volume 첫 생성 시 권한이 그대로 보존된다.
 RUN groupadd --system --gid 999 router \
     && useradd --system --uid 999 --gid router --create-home router \
-    && mkdir -p /home/router/.openclaw \
-    && chown -R router:router /app /opt/mju-cli /home/router/.openclaw \
-    && chmod 700 /home/router/.openclaw
+    && chown -R router:router /app /opt/mju-cli
 
 USER router
 
 ENV LOG_LEVEL=info \
     USER_DATA_ROOT=/data/users \
-    OPENCLAW_GATEWAY_URL=ws://mjuclaw-agent:18789 \
+    MJU_AGENT_URL=http://mjuclaw-agent:8000/v1/discord/messages \
+    MJU_AGENT_TIMEOUT_MS=600000 \
     HTTP_PORT=3100 \
     HTTP_BIND_HOST=0.0.0.0
 
