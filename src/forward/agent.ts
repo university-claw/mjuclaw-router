@@ -8,14 +8,20 @@ export type AgentForwardRequest = {
   channelType: "dm";
 };
 
-export type ForwardPayload = {
-  text?: string;
-  components?: unknown;
-  raw: unknown;
+export type AgentResponseStatus = "ok" | "blocked" | "unavailable";
+
+export type AgentTextMessage = {
+  type: "text";
+  text: string;
+};
+
+export type AgentResponse = {
+  status: AgentResponseStatus;
+  messages: AgentTextMessage[];
 };
 
 export type ForwardResult =
-  | { ok: true; payloads: ForwardPayload[]; raw: unknown }
+  | { ok: true; response: AgentResponse; raw: unknown }
   | { ok: false; reason: string; raw?: unknown };
 
 export class MjuClawAgentForwarder {
@@ -71,8 +77,15 @@ export class MjuClawAgentForwarder {
         };
       }
 
-      const payloads = this.extractPayloads(parsed);
-      return { ok: true, payloads, raw: parsed };
+      const agentResponse = this.parseAgentResponse(parsed);
+      if (!agentResponse) {
+        return {
+          ok: false,
+          reason: "agent_response_invalid",
+        };
+      }
+
+      return { ok: true, response: agentResponse, raw: parsed };
     } catch (err) {
       clearTimeout(timeoutId);
       const reason =
@@ -87,29 +100,37 @@ export class MjuClawAgentForwarder {
     }
   }
 
-  private extractPayloads(parsed: unknown): ForwardPayload[] {
-    if (!parsed || typeof parsed !== "object") return [];
+  private parseAgentResponse(parsed: unknown): AgentResponse | null {
+    if (!parsed || typeof parsed !== "object") return null;
     const obj = parsed as Record<string, unknown>;
-    const result = obj.result as Record<string, unknown> | undefined;
-    const rawPayloads = Array.isArray(obj.payloads)
-      ? obj.payloads
-      : result && Array.isArray(result.payloads)
-        ? result.payloads
-        : [];
+    const status = obj.status;
+    if (!isAgentResponseStatus(status)) return null;
 
-    return rawPayloads
-      .map((p): ForwardPayload | null => {
-        if (!p || typeof p !== "object") return null;
-        const r = p as Record<string, unknown>;
-        const text = typeof r.text === "string" ? r.text : undefined;
-        const components = r.components ?? r.interactive ?? undefined;
-        if (text === undefined && components === undefined) return null;
-        return {
-          ...(text !== undefined ? { text } : {}),
-          ...(components !== undefined ? { components } : {}),
-          raw: p,
-        };
-      })
-      .filter((x): x is ForwardPayload => x !== null);
+    if (!Array.isArray(obj.messages) || obj.messages.length === 0) return null;
+
+    const messages: AgentTextMessage[] = [];
+    for (const item of obj.messages) {
+      const message = parseAgentTextMessage(item);
+      if (!message) return null;
+      messages.push(message);
+    }
+
+    if ((status === "blocked" || status === "unavailable") && messages.length !== 1) {
+      return null;
+    }
+
+    return { status, messages };
   }
+}
+
+function isAgentResponseStatus(value: unknown): value is AgentResponseStatus {
+  return value === "ok" || value === "blocked" || value === "unavailable";
+}
+
+function parseAgentTextMessage(value: unknown): AgentTextMessage | null {
+  if (!value || typeof value !== "object") return null;
+  const obj = value as Record<string, unknown>;
+  if (obj.type !== "text") return null;
+  if (typeof obj.text !== "string" || obj.text.trim().length === 0) return null;
+  return { type: "text", text: obj.text };
 }

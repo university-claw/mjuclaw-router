@@ -137,14 +137,14 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
         return;
       }
 
-      if (result.payloads.length === 0) {
-        logger.debug({ userId }, "forward 성공이지만 payload 없음 (no-op)");
+      if (result.response.messages.length === 0) {
+        logger.debug({ userId }, "forward 성공이지만 message 없음 (no-op)");
         return;
       }
 
-      for (const p of result.payloads) {
-        if (p.text && p.text.length > 0) {
-          for (const chunk of chunkForDiscord(p.text)) {
+      for (const message of result.response.messages) {
+        if (message.type === "text") {
+          for (const chunk of chunkForDiscord(message.text)) {
             await reply(chunk);
           }
         }

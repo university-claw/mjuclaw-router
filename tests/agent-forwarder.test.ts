@@ -37,7 +37,8 @@ describe("MjuClawAgentForwarder", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
-          payloads: [{ type: "text", text: "오늘 과제는 2개예요." }],
+          status: "ok",
+          messages: [{ type: "text", text: "오늘 과제는 2개예요." }],
         }),
         { status: 200 }
       )
@@ -67,12 +68,55 @@ describe("MjuClawAgentForwarder", () => {
     });
 
     if (!result.ok) throw new Error("expected forward success");
-    expect(result.payloads).toEqual([
-      {
-        text: "오늘 과제는 2개예요.",
-        raw: { type: "text", text: "오늘 과제는 2개예요." },
-      },
-    ]);
+    expect(result.response).toEqual({
+      status: "ok",
+      messages: [{ type: "text", text: "오늘 과제는 2개예요." }],
+    });
+  });
+
+  it("rejects legacy OpenClaw payload responses", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          payloads: [{ type: "text", text: "legacy response" }],
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const forwarder = new MjuClawAgentForwarder(config, logger as never);
+    const result = await forwarder.forward({
+      discordUserId: "415349075274104832",
+      messageId: "123456789012345678",
+      messageText: "오늘 과제 뭐 있어?",
+      channelType: "dm",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "agent_response_invalid" });
+  });
+
+  it("rejects malformed agent response messages", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          status: "ok",
+          messages: [{ type: "component", text: "not supported yet" }],
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const forwarder = new MjuClawAgentForwarder(config, logger as never);
+    const result = await forwarder.forward({
+      discordUserId: "415349075274104832",
+      messageId: "123456789012345678",
+      messageText: "오늘 과제 뭐 있어?",
+      channelType: "dm",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "agent_response_invalid" });
   });
 
   it("does not log or return raw response bodies on non-2xx responses", async () => {
