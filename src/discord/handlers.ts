@@ -6,6 +6,7 @@ import {
 } from "../classifier/client.js";
 import { matchAbuseHeuristic } from "../classifier/heuristic.js";
 import type { Config } from "../config.js";
+import { shouldAllowClassifierOverride } from "../forward/academic-planning-routing.js";
 import type { Logger } from "../logger.js";
 import type { OpenClawForwarder } from "../forward/openclaw.js";
 import { buildOnboardingPrompt } from "../onboarding/modal.js";
@@ -60,16 +61,21 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
       // 분류 실패는 fail-open이지만 휴리스틱은 항상 평가한다 (모델 다운 시 최소 안전망).
 
       const heuristic = matchAbuseHeuristic(message.content);
+      const classifierOverrideAllowed = shouldAllowClassifierOverride(
+        message.content
+      );
 
       if (classifier.enabled) {
         const outcome = await classifier.classify(message.content);
         if (outcome.ok) {
+          const classifierBlocked = outcome.result.final === "abuse";
           logger.info(
             {
               userId,
               final: outcome.result.final,
               pAbuse: outcome.result.pAbuse,
               overridden: outcome.result.overriddenToAbuse,
+              classifierOverrideAllowed,
               latencyMs: outcome.result.latencyMs,
               heuristic: heuristic.blocked
                 ? { reason: heuristic.reason, matched: heuristic.matched }
@@ -77,20 +83,23 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
             },
             "intent classified"
           );
-          if (outcome.result.final === "abuse" || heuristic.blocked) {
+          if (heuristic.blocked || (classifierBlocked && !classifierOverrideAllowed)) {
             logger.info(
               {
                 userId,
-                source:
-                  outcome.result.final === "abuse"
-                    ? "classifier"
-                    : "heuristic",
+                source: classifierBlocked ? "classifier" : "heuristic",
                 heuristicReason: heuristic.reason,
               },
               "abuse 차단 — 정형 거절 응답"
             );
             await reply(ABUSE_REFUSAL_TEXT);
             return;
+          }
+          if (classifierBlocked && classifierOverrideAllowed) {
+            logger.warn(
+              { userId, final: outcome.result.final, pAbuse: outcome.result.pAbuse },
+              "classifier abuse 판정이었지만 academic-planning/link-refresh 안전 의도로 forward"
+            );
           }
         } else {
           logger.warn(
