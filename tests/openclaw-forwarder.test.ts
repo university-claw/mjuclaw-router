@@ -115,6 +115,34 @@ describe("OpenClawForwarder session isolation", () => {
     expect(messageArg(secondArgs)).not.toContain("111111111111111111");
   });
 
+  it("adds a narrow current-turn hint for timetable planning without changing current timetable lookup", async () => {
+    const execaMock = vi.mocked(execa);
+    execaMock.mockResolvedValue({
+      stdout: JSON.stringify({ result: { payloads: [] } }),
+      stderr: "",
+      exitCode: 0,
+    } as never);
+
+    const forwarder = new OpenClawForwarder(config, logger as never);
+    await forwarder.forward({
+      discordUserId: "415349075274104832",
+      message: "다음학기 시간표 짜고싶어",
+    });
+    await forwarder.forward({
+      discordUserId: "415349075274104832",
+      message: "내 현재 시간표 보여줘",
+    });
+
+    const plannerMessage = messageArg(execaMock.mock.calls[0]![1] as unknown[]);
+    const currentMessage = messageArg(execaMock.mock.calls[1]![1] as unknown[]);
+
+    expect(plannerMessage).toContain("[현재 요청 라우팅 힌트]");
+    expect(plannerMessage).toContain("mju-timetable-planner");
+    expect(plannerMessage).toContain("mju ucheck");
+    expect(currentMessage).not.toContain("[현재 요청 라우팅 힌트]");
+    expect(currentMessage).not.toContain("mju-timetable-planner");
+  });
+
   it("does not return or log raw subprocess output on OpenClaw failure", async () => {
     const execaMock = vi.mocked(execa);
     execaMock.mockResolvedValue({

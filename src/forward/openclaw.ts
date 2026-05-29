@@ -2,6 +2,7 @@ import { execa } from "execa";
 
 import type { Config } from "../config.js";
 import type { Logger } from "../logger.js";
+import { buildOpenClawRoutingHint } from "./academic-planning-routing.js";
 
 export type ForwardPayload = {
   text?: string;
@@ -46,6 +47,7 @@ export class OpenClawForwarder {
       `- 모든 mju-cli 호출의 \`--app-dir\`은 \`${this.config.USER_DATA_ROOT}/${params.discordUserId}\`만 사용하세요.\n` +
       `- 모든 helper의 Discord user id 인자도 ${params.discordUserId}만 사용하세요.\n` +
       `- 사용자 이름/호칭은 이 컨텍스트에서 추측하지 말고, 필요할 때 mju profile get으로 조회하세요.\n\n` +
+      buildOpenClawRoutingHint(params.message) +
       params.message;
 
     // Do not pass --to here. OpenClaw 2026.4.11 derives direct-chat
