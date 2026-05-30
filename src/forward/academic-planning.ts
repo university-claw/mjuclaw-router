@@ -93,19 +93,23 @@ export class AcademicPlanningForwarder {
       });
 
       if (exitCode !== 0) {
-        const reason = `academic_planning_exit_${exitCode ?? "unknown"}`;
+        const diagnostic = this.helperFailureDiagnostic(exitCode, stderr);
         this.logger.warn(
           {
             discordUserId: params.discordUserId,
             intent: params.intent,
             command,
-            reason,
+            reason: diagnostic.reason,
+            helperStage: diagnostic.stage,
+            helperDetail: diagnostic.detail,
+            helperMode: diagnostic.mode,
             stdoutLength: stdout.length,
             stderrLength: stderr.length,
+            stderrTail: this.redactForLog(stderr),
           },
           "deterministic academic-planning helper 실패"
         );
-        return { ok: false, reason };
+        return { ok: false, reason: diagnostic.reason };
       }
 
       const parsed = this.tryParseJson(stdout);
@@ -216,6 +220,80 @@ export class AcademicPlanningForwarder {
       }
       return undefined;
     }
+  }
+
+  private helperFailureDiagnostic(
+    exitCode: number | undefined,
+    stderr: string
+  ): { reason: string; stage?: string; detail?: string; mode?: string } {
+    const code = String(exitCode ?? "unknown").replace(/[^a-zA-Z0-9_-]/gu, "_");
+    const diag = this.lastHelperDiagnostic(stderr);
+    if (diag) {
+      return {
+        ...diag,
+        reason: `academic_planning_exit_${code}.${diag.stage}.${diag.detail}`,
+      };
+    }
+
+    const fallback = this.legacyFailureDiagnostic(stderr);
+    if (fallback) {
+      return {
+        ...fallback,
+        reason: `academic_planning_exit_${code}.${fallback.stage}.${fallback.detail}`,
+      };
+    }
+
+    return { reason: `academic_planning_exit_${code}.unknown.unknown` };
+  }
+
+  private lastHelperDiagnostic(
+    stderr: string
+  ): { stage: string; detail: string; mode?: string } | null {
+    const pattern =
+      /ACADEMIC_PLANNING_DIAG\s+stage=([a-zA-Z0-9_-]+)\s+detail=([a-zA-Z0-9_-]+)(?:\s+mode=([a-zA-Z0-9_-]+))?/gu;
+    let match: RegExpExecArray | null;
+    let last: { stage: string; detail: string; mode?: string } | null = null;
+    while ((match = pattern.exec(stderr)) !== null) {
+      const stage = this.safeDiagnosticSegment(match[1]);
+      const detail = this.safeDiagnosticSegment(match[2]);
+      const mode = match[3] ? this.safeDiagnosticSegment(match[3]) : undefined;
+      if (stage && detail) {
+        last = { stage, detail, ...(mode ? { mode } : {}) };
+      }
+    }
+    return last;
+  }
+
+  private legacyFailureDiagnostic(
+    stderr: string
+  ): { stage: string; detail: string } | null {
+    if (stderr.includes("failed to read MSI grade history")) {
+      return { stage: "msi", detail: "grade_history_read_failed" };
+    }
+    if (stderr.includes("could not resolve department")) {
+      return { stage: "context", detail: "department_missing" };
+    }
+    if (stderr.includes("could not resolve student number")) {
+      return { stage: "context", detail: "student_identity_missing" };
+    }
+    if (stderr.includes("mju-news is required")) {
+      return { stage: "environment", detail: "mju_news_missing" };
+    }
+    if (stderr.includes("mju is required")) {
+      return { stage: "environment", detail: "mju_missing" };
+    }
+    return null;
+  }
+
+  private safeDiagnosticSegment(value: string | undefined): string {
+    return (value ?? "").replace(/[^a-zA-Z0-9_-]/gu, "_").slice(0, 80);
+  }
+
+  private redactForLog(value: string): string {
+    return value
+      .replace(/[0-9]{7,}/gu, "[number]")
+      .replace(/https?:\/\/\S+/gu, "[url]")
+      .slice(-1500);
   }
 
   private lastPath(discordUserId: string): string {

@@ -155,4 +155,59 @@ describe("AcademicPlanningForwarder", () => {
     expect(result).toEqual({ handled: false });
     expect(mockedExeca).not.toHaveBeenCalled();
   });
+
+  it("returns the deepest helper diagnostic stage when the helper exits non-zero", async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: "",
+      stderr: [
+        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read mode=timetable",
+        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read_failed mode=timetable",
+        "ERR: failed to read MSI grade history for academic planning",
+      ].join("\n"),
+      exitCode: 1,
+    } as never);
+    const forwarder = new AcademicPlanningForwarder(config(userDataRoot), logger);
+
+    const result = await forwarder.tryForward({
+      discordUserId,
+      message: "시간표 설계",
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      intent: "timetable-planner",
+      reason: "academic_planning_exit_1.msi.grade_history_read_failed",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "academic_planning_exit_1.msi.grade_history_read_failed",
+        helperStage: "msi",
+        helperDetail: "grade_history_read_failed",
+        helperMode: "timetable",
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("falls back to legacy helper stderr patterns when no structured diagnostic is present", async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: "",
+      stderr: "ERR: failed to read MSI grade history for academic planning",
+      exitCode: 1,
+    } as never);
+    const forwarder = new AcademicPlanningForwarder(config(userDataRoot), logger);
+
+    const result = await forwarder.tryForward({
+      discordUserId,
+      message: "졸업로드맵 보여줘",
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      intent: "graduation-roadmap",
+      reason: "academic_planning_exit_1.msi.grade_history_read_failed",
+    });
+  });
 });
