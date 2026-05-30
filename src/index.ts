@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { createDiscordClient } from "./discord/client.js";
 import { registerMessageHandlers } from "./discord/handlers.js";
 import { registerInteractionHandlers } from "./discord/interaction.js";
+import { AcademicPlanningForwarder } from "./forward/academic-planning.js";
 import { ensureOpenClawClientConfig } from "./forward/bootstrap.js";
 import { OpenClawForwarder } from "./forward/openclaw.js";
 import { createHttpServer } from "./http/server.js";
@@ -32,6 +33,7 @@ async function main() {
   const status = new OnboardingStatusChecker(config, logger);
   const loginRunner = new OnboardingLoginRunner(config, logger);
   const forwarder = new OpenClawForwarder(config, logger);
+  const academicPlanning = new AcademicPlanningForwarder(config, logger);
   const classifier = new IntentClassifierClient(config, logger);
 
   const client = createDiscordClient(config, logger);
@@ -40,6 +42,7 @@ async function main() {
     logger,
     status,
     forwarder,
+    academicPlanning,
     classifier,
   });
   registerInteractionHandlers(client, { logger, loginRunner });

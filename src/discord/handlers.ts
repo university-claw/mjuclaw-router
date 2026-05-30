@@ -7,6 +7,7 @@ import {
 import { matchAbuseHeuristic } from "../classifier/heuristic.js";
 import type { Config } from "../config.js";
 import { shouldAllowClassifierOverride } from "../forward/academic-planning-routing.js";
+import type { AcademicPlanningForwarder } from "../forward/academic-planning.js";
 import type { Logger } from "../logger.js";
 import type { OpenClawForwarder } from "../forward/openclaw.js";
 import { buildOnboardingPrompt } from "../onboarding/modal.js";
@@ -18,11 +19,12 @@ export type HandlerDeps = {
   logger: Logger;
   status: OnboardingStatusChecker;
   forwarder: OpenClawForwarder;
+  academicPlanning: AcademicPlanningForwarder;
   classifier: IntentClassifierClient;
 };
 
 export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
-  const { logger, config, status, forwarder, classifier } = deps;
+  const { logger, config, status, forwarder, academicPlanning, classifier } = deps;
 
   client.on("messageCreate", async (message) => {
     try {
@@ -125,12 +127,38 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
         return;
       }
 
-      // 온보딩 완료 + (필요 시) 분류 통과 사용자 → openclaw로 forward
       const channel = message.channel;
       const sendTyping =
         "sendTyping" in channel ? channel.sendTyping.bind(channel) : null;
       if (sendTyping) await sendTyping();
 
+      const academicPlanningResult = await academicPlanning.tryForward({
+        discordUserId: userId,
+        message: message.content,
+      });
+      if (academicPlanningResult.handled) {
+        if (!academicPlanningResult.ok) {
+          logger.warn(
+            {
+              userId,
+              intent: academicPlanningResult.intent,
+              reason: academicPlanningResult.reason,
+            },
+            "deterministic academic-planning forward 실패"
+          );
+          await reply(
+            `학사 계획 웹뷰를 여는 중 문제가 생겼어요. 진단 코드: ${academicPlanningResult.reason}`
+          );
+          return;
+        }
+
+        for (const chunk of chunkForDiscord(academicPlanningResult.text)) {
+          await reply(chunk);
+        }
+        return;
+      }
+
+      // 온보딩 완료 + (필요 시) 분류 통과 사용자 → openclaw로 forward
       const result = await forwarder.forward({
         discordUserId: userId,
         message: message.content,

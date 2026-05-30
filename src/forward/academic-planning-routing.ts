@@ -2,6 +2,11 @@ export type AcademicPlanningIntent =
   | "timetable-planner"
   | "graduation-roadmap";
 
+export type AcademicPlanningTerm = {
+  year: string;
+  termCode: "10" | "20";
+};
+
 const TIMETABLE_NOUNS = [
   "시간표",
   "수업 시간표",
@@ -129,6 +134,27 @@ export function shouldAllowClassifierOverride(message: string): boolean {
     classifyAcademicPlanningIntent(message) !== null ||
     isExpiredWebviewRefreshRequest(message)
   );
+}
+
+export function extractAcademicPlanningTerm(
+  message: string
+): AcademicPlanningTerm | null {
+  const text = message.normalize("NFKC");
+  const patterns = [
+    /(20\d{2})\s*(?:학년도|년)?\s*[-./]?\s*([12])\s*학기/u,
+    /(20\d{2})\s*[-./]\s*([12])\b/u,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (!match?.[1] || !match[2]) continue;
+    return {
+      year: match[1],
+      termCode: match[2] === "1" ? "10" : "20",
+    };
+  }
+
+  return null;
 }
 
 export function buildOpenClawRoutingHint(message: string): string {

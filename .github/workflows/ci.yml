@@ -56,6 +56,14 @@ jobs:
           path: mju-cli
           token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
 
+      - name: Check out mju-news build context
+        uses: actions/checkout@v4
+        with:
+          repository: university-claw/mju-public-data-reader
+          ref: main
+          path: mju-news
+          token: ${{ secrets.CI_REPO_READ_TOKEN || github.token }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -82,6 +90,7 @@ jobs:
           context: .
           build-contexts: |
             mju-cli=./mju-cli
+            mju-news=./mju-news
           load: ${{ github.event_name != 'push' || github.ref != 'refs/heads/main' }}
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}

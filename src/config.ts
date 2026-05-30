@@ -8,6 +8,13 @@ const ConfigSchema = z.object({
   OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
   OPENCLAW_BIN: z.string().min(1).default("openclaw"),
   MJU_BIN: z.string().min(1).default("mju"),
+  MJU_TIMETABLE_PLANNER_BIN: z.string().min(1).default("mju-timetable-planner"),
+  MJU_GRADUATION_ROADMAP_BIN: z.string().min(1).default("mju-graduation-roadmap"),
+  ACADEMIC_PLANNING_TIMEOUT_MS: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(600_000),
   // HTTP 서버: 컨테이너 내부 alert helper(`mju-news-alert`, `mju-attendance-alert`)가
   // OpenClaw 측 Discord channel 비활성화에 따라 router로 우회하기 위해 사용한다.
   // docker-compose 내부 네트워크에서만 접근하므로 외부 노출 금지.
