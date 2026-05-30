@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execa } from "execa";
@@ -161,7 +161,7 @@ describe("AcademicPlanningForwarder", () => {
       stdout: "",
       stderr: [
         "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read mode=timetable",
-        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read_failed mode=timetable",
+        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_password_change_interstitial_detected mode=timetable",
         "ERR: failed to read MSI grade history for academic planning",
       ].join("\n"),
       exitCode: 1,
@@ -177,14 +177,50 @@ describe("AcademicPlanningForwarder", () => {
       handled: true,
       ok: false,
       intent: "timetable-planner",
-      reason: "academic_planning_exit_1.msi.grade_history_read_failed",
+      reason: "academic_planning_exit_1.msi.grade_history_password_change_interstitial_detected",
     });
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        reason: "academic_planning_exit_1.msi.grade_history_read_failed",
+        reason: "academic_planning_exit_1.msi.grade_history_password_change_interstitial_detected",
         helperStage: "msi",
-        helperDetail: "grade_history_read_failed",
+        helperDetail: "grade_history_password_change_interstitial_detected",
         helperMode: "timetable",
+      }),
+      expect.any(String)
+    );
+  });
+
+  it("returns public-data helper diagnostics after MSI context succeeds", async () => {
+    mockedExeca.mockResolvedValueOnce({
+      stdout: "",
+      stderr: [
+        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read mode=graduation-roadmap",
+        "ACADEMIC_PLANNING_DIAG stage=context detail=extract_from_msi mode=graduation-roadmap",
+        "ACADEMIC_PLANNING_DIAG stage=public_data detail=academic_planning_run mode=graduation-roadmap",
+        "ACADEMIC_PLANNING_DIAG stage=public_data detail=academic_planning_db_table_missing mode=graduation-roadmap",
+        "ERR: failed to build academic planning payload",
+      ].join("\n"),
+      exitCode: 1,
+    } as never);
+    const forwarder = new AcademicPlanningForwarder(config(userDataRoot), logger);
+
+    const result = await forwarder.tryForward({
+      discordUserId,
+      message: "졸업로드맵",
+    });
+
+    expect(result).toMatchObject({
+      handled: true,
+      ok: false,
+      intent: "graduation-roadmap",
+      reason: "academic_planning_exit_1.public_data.academic_planning_db_table_missing",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "academic_planning_exit_1.public_data.academic_planning_db_table_missing",
+        helperStage: "public_data",
+        helperDetail: "academic_planning_db_table_missing",
+        helperMode: "graduation-roadmap",
       }),
       expect.any(String)
     );
@@ -209,5 +245,16 @@ describe("AcademicPlanningForwarder", () => {
       intent: "graduation-roadmap",
       reason: "academic_planning_exit_1.msi.grade_history_read_failed",
     });
+  });
+
+  it("keeps the bundled helper wired for deeper runtime diagnostics", async () => {
+    const helper = await readFile(new URL("../bin/mju-academic-planning", import.meta.url), "utf8");
+
+    expect(helper).toContain("classify_grade_history_failure");
+    expect(helper).toContain("grade_history_password_change_interstitial_detected");
+    expect(helper).toContain("classify_public_data_failure");
+    expect(helper).toContain("academic_planning_db_table_missing");
+    expect(helper).toContain("> \"$MJU_NEWS_STDOUT\" 2> \"$MJU_NEWS_STDERR\"");
+    expect(helper).toContain("cat \"$MJU_NEWS_STDOUT\"");
   });
 });

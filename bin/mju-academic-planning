@@ -119,6 +119,165 @@ else:
 PY
 }
 
+classify_grade_history_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  local app_dir="$3"
+  GRADE_HISTORY_STDOUT="$stdout_file" \
+  GRADE_HISTORY_STDERR="$stderr_file" \
+  GRADE_HISTORY_APP_DIR="$app_dir" \
+  python3 - <<'PY'
+import os
+from pathlib import Path
+
+def read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")[:1000000]
+    except Exception:
+        return ""
+
+stdout_text = read(os.environ["GRADE_HISTORY_STDOUT"])
+stderr_text = read(os.environ["GRADE_HISTORY_STDERR"])
+app_dir = Path(os.environ["GRADE_HISTORY_APP_DIR"])
+main_html = read(str(app_dir / "snapshots" / "msi-main.html"))
+combined = "\n".join([stdout_text, stderr_text, main_html])
+lower = combined.lower()
+
+def has_password_change_interstitial() -> bool:
+    url_or_code_hit = any(
+        marker in lower
+        for marker in [
+            "password_change_interstitial",
+            "pwchange",
+            "changepw",
+            "change-pw",
+        ]
+    )
+    password_hit = (
+        "password" in lower
+        or "passwd" in lower
+        or "pwd" in lower
+        or "\ube44\ubc00\ubc88\ud638" in combined
+    )
+    change_hit = (
+        "change" in lower
+        or "update" in lower
+        or "\ubcc0\uacbd" in combined
+        or "\uc218\uc815" in combined
+    )
+    return url_or_code_hit or (password_hit and change_hit)
+
+if has_password_change_interstitial():
+    print("grade_history_password_change_interstitial_detected")
+elif "[msi.open_menu.main_context_failed]" in combined:
+    print("grade_history_main_context_failed")
+elif "[msi.open_menu.go_body_failed]" in combined:
+    print("grade_history_go_body_failed")
+elif "[msi.open_menu.page_open_failed]" in combined:
+    print("grade_history_page_open_failed")
+elif "\uc800\uc7a5\ub41c \ub85c\uadf8\uc778 \uc815\ubcf4\uac00 \uc5c6\uc2b5\ub2c8\ub2e4" in combined:
+    print("grade_history_stored_login_missing")
+elif "\uc800\uc7a5\ub41c \ube44\ubc00\ubc88\ud638\ub97c \uc77d\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4" in combined:
+    print("grade_history_stored_password_unreadable")
+elif "SSO \ub85c\uadf8\uc778\uc5d0 \uc2e4\ud328" in combined:
+    print("grade_history_sso_login_failed")
+elif "signin-form" in lower or "sso form" in lower:
+    print("grade_history_sso_form_parse_failed")
+elif "callback URL" in combined or "callback url" in lower:
+    print("grade_history_sso_callback_missing")
+elif "code/_csrf" in combined or ("code" in lower and "_csrf" in lower):
+    print("grade_history_sso_callback_fields_missing")
+elif "login_security" in lower and "_csrf" in lower:
+    print("grade_history_login_security_csrf_missing")
+elif "csrf" in lower:
+    print("grade_history_csrf_missing")
+else:
+    print("grade_history_unknown_failed")
+PY
+}
+
+classify_context_failure() {
+  local stderr_file="$1"
+  CONTEXT_STDERR="$stderr_file" python3 - <<'PY'
+import os
+from pathlib import Path
+
+try:
+    text = Path(os.environ["CONTEXT_STDERR"]).read_text(encoding="utf-8", errors="ignore")[:1000000]
+except Exception:
+    text = ""
+lower = text.lower()
+
+if "permission denied" in lower or "errno 13" in lower:
+    print("extract_from_msi_permission_denied")
+elif "no space left" in lower or "errno 28" in lower:
+    print("extract_from_msi_no_space_left")
+elif "json" in lower:
+    print("extract_from_msi_json_failed")
+else:
+    print("extract_from_msi_failed")
+PY
+}
+
+classify_public_data_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  PUBLIC_DATA_STDOUT="$stdout_file" \
+  PUBLIC_DATA_STDERR="$stderr_file" \
+  python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+def read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")[:1000000]
+    except Exception:
+        return ""
+
+def envelope(text: str) -> dict:
+    start = text.find("{")
+    if start < 0:
+        return {}
+    try:
+        value = json.loads(text[start:])
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+stdout_text = read(os.environ["PUBLIC_DATA_STDOUT"])
+stderr_text = read(os.environ["PUBLIC_DATA_STDERR"])
+combined = "\n".join([stdout_text, stderr_text])
+lower = combined.lower()
+payload = envelope(stdout_text)
+error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+error_type = str(error.get("type") or "")
+message = str(error.get("message") or "")
+message_lower = message.lower()
+
+if "missing required env var: pg" in lower:
+    print("academic_planning_db_env_missing")
+elif "invalid pgport" in lower:
+    print("academic_planning_db_env_invalid")
+elif "required public-data table is missing" in lower or "code=42p01" in lower:
+    print("academic_planning_db_table_missing")
+elif "academic-planning course-catalog preflight failed" in lower:
+    print("academic_planning_course_catalog_db_failed")
+elif "academic-planning graduation-requirements preflight failed" in lower:
+    print("academic_planning_graduation_requirements_db_failed")
+elif error_type == "InputError" or "--admission-year is required" in message_lower:
+    print("academic_planning_input_invalid")
+elif error_type == "ConfigError":
+    print("academic_planning_config_failed")
+elif error_type == "DbError" or "public-data db read failed" in lower:
+    print("academic_planning_db_failed")
+elif "view_api_url" in lower or "api/view" in lower:
+    print("academic_planning_view_failed")
+else:
+    print("academic_planning_unknown_failed")
+PY
+}
+
 if [[ "$MODE" == "timetable" && ( -z "$YEAR" || -z "$TERM_CODE" ) ]]; then
   diag "term" "default_resolve"
   read -r DEFAULT_YEAR DEFAULT_TERM_CODE < <(default_term)
@@ -137,10 +296,14 @@ fi
 APP_DIR="${USER_DATA_ROOT:-/data/users}/$DISCORD_ID"
 PROFILE_JSON="$TMP_DIR/profile.json"
 GRADE_HISTORY_JSON="$TMP_DIR/grade-history.json"
+GRADE_HISTORY_STDERR="$TMP_DIR/grade-history.stderr"
 CURRENT_TIMETABLE_JSON="$TMP_DIR/current-timetable.json"
 DEPARTMENT_TIMETABLE_JSON="$TMP_DIR/department-timetable.json"
 PERSONAL_JSON="$TMP_DIR/personal-msi.json"
 INFO_JSON="$TMP_DIR/info.json"
+CONTEXT_STDERR="$TMP_DIR/context.stderr"
+MJU_NEWS_STDOUT="$TMP_DIR/mju-news.stdout"
+MJU_NEWS_STDERR="$TMP_DIR/mju-news.stderr"
 
 SKIP_VIEW_ENV="${MJU_ACADEMIC_PLANNING_SKIP_VIEW:-1}"
 
@@ -151,9 +314,11 @@ if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json profi
 fi
 
 diag "msi" "grade_history_read"
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON"; then
-  diag "msi" "grade_history_read_failed"
+if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON" 2> "$GRADE_HISTORY_STDERR"; then
+  DETAIL=$(classify_grade_history_failure "$GRADE_HISTORY_JSON" "$GRADE_HISTORY_STDERR" "$APP_DIR")
+  diag "msi" "$DETAIL"
   echo "ERR: failed to read MSI grade history for academic planning" >&2
+  cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
   cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
   exit 1
 fi
@@ -178,7 +343,7 @@ if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju "${DEPARTMENT_ARGS[@]}" > "$DEPARTMENT_T
 fi
 
 diag "context" "extract_from_msi"
-EXPLICIT_DEPARTMENT="$DEPARTMENT" \
+if ! EXPLICIT_DEPARTMENT="$DEPARTMENT" \
 EXPLICIT_ADMISSION_YEAR="$ADMISSION_YEAR" \
 EXPLICIT_STUDENT_NUMBER="$STUDENT_NUMBER" \
 PROFILE_JSON="$PROFILE_JSON" \
@@ -187,7 +352,7 @@ CURRENT_TIMETABLE_JSON="$CURRENT_TIMETABLE_JSON" \
 DEPARTMENT_TIMETABLE_JSON="$DEPARTMENT_TIMETABLE_JSON" \
 PERSONAL_JSON="$PERSONAL_JSON" \
 INFO_JSON="$INFO_JSON" \
-python3 - <<'PY' || fail_stage "context" "extract_from_msi_failed"
+python3 - <<'PY' 2> "$CONTEXT_STDERR"
 import json
 import os
 import re
@@ -294,6 +459,12 @@ Path(os.environ["INFO_JSON"]).write_text(
     encoding="utf-8",
 )
 PY
+then
+  DETAIL=$(classify_context_failure "$CONTEXT_STDERR")
+  diag "context" "$DETAIL"
+  cat "$CONTEXT_STDERR" >&2 2>/dev/null || true
+  exit 1
+fi
 
 json_field() {
   local field="$1"
@@ -308,9 +479,15 @@ print(value if isinstance(value, str) else "")
 PY
 }
 
-DEPARTMENT="$(json_field department)"
-STUDENT_NUMBER="$(json_field studentNumber)"
-ADMISSION_YEAR="$(json_field admissionYear)"
+if ! DEPARTMENT="$(json_field department)"; then
+  fail_stage "context" "department_field_read_failed"
+fi
+if ! STUDENT_NUMBER="$(json_field studentNumber)"; then
+  fail_stage "context" "student_number_field_read_failed"
+fi
+if ! ADMISSION_YEAR="$(json_field admissionYear)"; then
+  fail_stage "context" "admission_year_field_read_failed"
+fi
 
 if [[ -z "$DEPARTMENT" ]]; then
   fail_stage "context" "department_missing" 64
@@ -339,8 +516,14 @@ MJU_NEWS_ARGS+=("--personal-msi-json" "$PERSONAL_JSON")
 MJU_NEWS_ARGS+=("--completed-courses-json" "$GRADE_HISTORY_JSON")
 
 diag "public_data" "academic_planning_run"
-if ! mju-news "${MJU_NEWS_ARGS[@]}"; then
-  fail_stage "public_data" "academic_planning_failed"
+if ! mju-news "${MJU_NEWS_ARGS[@]}" > "$MJU_NEWS_STDOUT" 2> "$MJU_NEWS_STDERR"; then
+  DETAIL=$(classify_public_data_failure "$MJU_NEWS_STDOUT" "$MJU_NEWS_STDERR")
+  diag "public_data" "$DETAIL"
+  echo "ERR: failed to build academic planning payload" >&2
+  cat "$MJU_NEWS_STDERR" >&2 2>/dev/null || true
+  cat "$MJU_NEWS_STDOUT" >&2 2>/dev/null || true
+  exit 1
 fi
+cat "$MJU_NEWS_STDOUT"
 
 diag "success" "output_written"
