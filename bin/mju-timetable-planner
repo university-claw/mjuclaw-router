@@ -1,0 +1,4 @@
+#!/bin/bash
+# Dedicated command surface for next-term timetable planning.
+set -euo pipefail
+exec mju-academic-planning timetable "$@"

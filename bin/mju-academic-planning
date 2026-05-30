@@ -1,0 +1,299 @@
+#!/bin/bash
+# Deterministic academic-planning helper for mjuclaw-router.
+#
+# The router uses this helper only after it has already classified the user's
+# natural-language request into a fixed academic-planning intent.
+
+set -euo pipefail
+
+usage() {
+  cat >&2 <<'USAGE'
+mju-academic-planning timetable <discord_id> [--year YYYY] [--term-code CODE] [--department DEPT] [--admission-year YYYY] [--student-number NO] [--format json]
+mju-academic-planning graduation-roadmap <discord_id> [--department DEPT] [--admission-year YYYY] [--student-number NO] [--format json]
+USAGE
+}
+
+die() {
+  echo "ERR: $*" >&2
+  exit 64
+}
+
+need_bin() {
+  command -v "$1" >/dev/null 2>&1 || die "$1 is required"
+}
+
+if [[ $# -lt 2 ]]; then
+  usage
+  exit 64
+fi
+
+MODE="$1"
+DISCORD_ID="$2"
+shift 2
+
+case "$MODE" in
+  timetable|graduation-roadmap) ;;
+  *) usage; die "unsupported mode: $MODE" ;;
+esac
+
+[[ "$DISCORD_ID" =~ ^[0-9]{17,20}$ ]] || die "discord_id must be a Discord snowflake"
+
+YEAR=""
+TERM_CODE=""
+DEPARTMENT=""
+ADMISSION_YEAR=""
+STUDENT_NUMBER=""
+STUDENT_TYPE=""
+GRADUATION_TERM=""
+FORMAT="json"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --year)
+      YEAR="${2:-}"; shift 2 ;;
+    --term-code)
+      TERM_CODE="${2:-}"; shift 2 ;;
+    --department)
+      DEPARTMENT="${2:-}"; shift 2 ;;
+    --admission-year)
+      ADMISSION_YEAR="${2:-}"; shift 2 ;;
+    --student-number)
+      STUDENT_NUMBER="${2:-}"; shift 2 ;;
+    --student-type)
+      STUDENT_TYPE="${2:-}"; shift 2 ;;
+    --graduation-term)
+      GRADUATION_TERM="${2:-}"; shift 2 ;;
+    --format)
+      FORMAT="${2:-}"; shift 2 ;;
+    --help|-h)
+      usage; exit 0 ;;
+    *)
+      die "unknown option: $1" ;;
+  esac
+done
+
+[[ "$FORMAT" == "json" ]] || die "only --format json is supported"
+
+need_bin mju
+need_bin mju-news
+need_bin python3
+
+default_term() {
+  python3 - <<'PY'
+from datetime import datetime
+
+now = datetime.now()
+year = now.year
+month = now.month
+if month <= 2:
+    print(f"{year} 10")
+elif month <= 8:
+    print(f"{year} 10")
+else:
+    print(f"{year + 1} 10")
+PY
+}
+
+if [[ "$MODE" == "timetable" && ( -z "$YEAR" || -z "$TERM_CODE" ) ]]; then
+  read -r DEFAULT_YEAR DEFAULT_TERM_CODE < <(default_term)
+  YEAR="${YEAR:-$DEFAULT_YEAR}"
+  TERM_CODE="${TERM_CODE:-$DEFAULT_TERM_CODE}"
+fi
+
+TMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mju-academic-planning.XXXXXX")
+if [[ "${MJU_ACADEMIC_PLANNING_KEEP_TMP:-}" != "1" ]]; then
+  trap 'rm -rf "$TMP_DIR"' EXIT
+fi
+
+APP_DIR="${USER_DATA_ROOT:-/data/users}/$DISCORD_ID"
+PROFILE_JSON="$TMP_DIR/profile.json"
+GRADE_HISTORY_JSON="$TMP_DIR/grade-history.json"
+CURRENT_TIMETABLE_JSON="$TMP_DIR/current-timetable.json"
+DEPARTMENT_TIMETABLE_JSON="$TMP_DIR/department-timetable.json"
+PERSONAL_JSON="$TMP_DIR/personal-msi.json"
+INFO_JSON="$TMP_DIR/info.json"
+
+SKIP_VIEW_ENV="${MJU_ACADEMIC_PLANNING_SKIP_VIEW:-1}"
+
+if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json profile get > "$PROFILE_JSON"; then
+  printf '{}\n' > "$PROFILE_JSON"
+fi
+
+if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON"; then
+  echo "ERR: failed to read MSI grade history for academic planning" >&2
+  cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
+  exit 1
+fi
+
+if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi timetable > "$CURRENT_TIMETABLE_JSON"; then
+  printf '{}\n' > "$CURRENT_TIMETABLE_JSON"
+fi
+
+DEPARTMENT_ARGS=("--app-dir" "$APP_DIR" "--format" "json" "msi" "department-timetable")
+if [[ -n "$YEAR" ]]; then DEPARTMENT_ARGS+=("--year" "$YEAR"); fi
+if [[ -n "$TERM_CODE" ]]; then DEPARTMENT_ARGS+=("--term-code" "$TERM_CODE"); fi
+if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju "${DEPARTMENT_ARGS[@]}" > "$DEPARTMENT_TIMETABLE_JSON"; then
+  if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi department-timetable > "$DEPARTMENT_TIMETABLE_JSON"; then
+    printf '{}\n' > "$DEPARTMENT_TIMETABLE_JSON"
+  fi
+fi
+
+EXPLICIT_DEPARTMENT="$DEPARTMENT" \
+EXPLICIT_ADMISSION_YEAR="$ADMISSION_YEAR" \
+EXPLICIT_STUDENT_NUMBER="$STUDENT_NUMBER" \
+PROFILE_JSON="$PROFILE_JSON" \
+GRADE_HISTORY_JSON="$GRADE_HISTORY_JSON" \
+CURRENT_TIMETABLE_JSON="$CURRENT_TIMETABLE_JSON" \
+DEPARTMENT_TIMETABLE_JSON="$DEPARTMENT_TIMETABLE_JSON" \
+PERSONAL_JSON="$PERSONAL_JSON" \
+INFO_JSON="$INFO_JSON" \
+python3 - <<'PY'
+import json
+import os
+import re
+from pathlib import Path
+
+def load(path: str) -> object:
+    try:
+        text = Path(path).read_text(encoding="utf-8").lstrip("\ufeff")
+        return json.loads(text) if text.strip() else {}
+    except Exception:
+        return {}
+
+def record(value: object) -> dict:
+    return value if isinstance(value, dict) else {}
+
+def text(value: object) -> str:
+    if isinstance(value, str):
+        return re.sub(r"\s+", " ", value).strip()
+    if isinstance(value, (int, float)):
+        return str(value)
+    return ""
+
+def first_text(*values: object) -> str:
+    for value in values:
+        candidate = text(value)
+        if candidate:
+            return candidate
+    return ""
+
+profile = record(load(os.environ["PROFILE_JSON"]))
+grade_history = record(load(os.environ["GRADE_HISTORY_JSON"]))
+current_timetable = record(load(os.environ["CURRENT_TIMETABLE_JSON"]))
+department_timetable = record(load(os.environ["DEPARTMENT_TIMETABLE_JSON"]))
+
+student_info = record(grade_history.get("studentInfo"))
+department_code = first_text(
+    department_timetable.get("departmentCode"),
+    student_info.get("departmentCode"),
+    student_info.get("학과코드"),
+)
+department_label = first_text(
+    department_timetable.get("departmentLabel"),
+    student_info.get("department"),
+    student_info.get("dept"),
+    student_info.get("학과"),
+    student_info.get("소속"),
+)
+combined_department = " ".join(part for part in [department_code, department_label] if part).strip()
+department = first_text(os.environ.get("EXPLICIT_DEPARTMENT"), combined_department, department_label, department_code)
+
+student_number = first_text(
+    os.environ.get("EXPLICIT_STUDENT_NUMBER"),
+    profile.get("storedUserId"),
+    profile.get("userId"),
+    student_info.get("학번"),
+    student_info.get("studentNo"),
+    student_info.get("studentNumber"),
+)
+admission_year = first_text(os.environ.get("EXPLICIT_ADMISSION_YEAR"))
+
+current_courses = []
+seen_current = set()
+entries = current_timetable.get("entries")
+for entry in entries if isinstance(entries, list) else []:
+    if not isinstance(entry, dict):
+        continue
+    title = first_text(entry.get("courseTitle"), entry.get("title"), entry.get("name"))
+    code = first_text(entry.get("courseCode"), entry.get("curiNum"), entry.get("curriculumNumber"))
+    key = (title, code)
+    if not any(key) or key in seen_current:
+        continue
+    seen_current.add(key)
+    row = {"courseTitle": title or code}
+    if code:
+        row["courseCode"] = code
+    credits = entry.get("credits", entry.get("credit"))
+    if isinstance(credits, (int, float)):
+        row["credits"] = credits
+    current_courses.append(row)
+
+personal = {
+    "studentInfo": {
+        **student_info,
+        **({"department": department_label} if department_label else {}),
+        **({"departmentCode": department_code} if department_code else {}),
+        **({"studentNumber": student_number} if student_number else {}),
+    },
+    "currentCourses": current_courses,
+}
+Path(os.environ["PERSONAL_JSON"]).write_text(
+    json.dumps(personal, ensure_ascii=False),
+    encoding="utf-8",
+)
+
+Path(os.environ["INFO_JSON"]).write_text(
+    json.dumps(
+        {
+            "department": department,
+            "studentNumber": student_number,
+            "admissionYear": admission_year,
+        },
+        ensure_ascii=False,
+    ),
+    encoding="utf-8",
+)
+PY
+
+json_field() {
+  local field="$1"
+  INFO_JSON="$INFO_JSON" FIELD="$field" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+data = json.loads(Path(os.environ["INFO_JSON"]).read_text(encoding="utf-8"))
+value = data.get(os.environ["FIELD"], "")
+print(value if isinstance(value, str) else "")
+PY
+}
+
+DEPARTMENT="$(json_field department)"
+STUDENT_NUMBER="$(json_field studentNumber)"
+ADMISSION_YEAR="$(json_field admissionYear)"
+
+[[ -n "$DEPARTMENT" ]] || die "could not resolve department from MSI data"
+if [[ -z "$STUDENT_NUMBER" && -z "$ADMISSION_YEAR" ]]; then
+  die "could not resolve student number or admission year from MSI data"
+fi
+
+MJU_NEWS_ARGS=("academic-planning" "$MODE" "--department" "$DEPARTMENT" "--format" "json")
+if [[ "$MODE" == "timetable" ]]; then
+  MJU_NEWS_ARGS+=("--year" "$YEAR" "--term-code" "$TERM_CODE")
+fi
+if [[ -n "$ADMISSION_YEAR" ]]; then
+  MJU_NEWS_ARGS+=("--admission-year" "$ADMISSION_YEAR")
+fi
+if [[ -n "$STUDENT_NUMBER" ]]; then
+  MJU_NEWS_ARGS+=("--student-number" "$STUDENT_NUMBER")
+fi
+if [[ -n "$STUDENT_TYPE" ]]; then
+  MJU_NEWS_ARGS+=("--student-type" "$STUDENT_TYPE")
+fi
+if [[ -n "$GRADUATION_TERM" ]]; then
+  MJU_NEWS_ARGS+=("--graduation-term" "$GRADUATION_TERM")
+fi
+MJU_NEWS_ARGS+=("--personal-msi-json" "$PERSONAL_JSON")
+MJU_NEWS_ARGS+=("--completed-courses-json" "$GRADE_HISTORY_JSON")
+
+mju-news "${MJU_NEWS_ARGS[@]}"

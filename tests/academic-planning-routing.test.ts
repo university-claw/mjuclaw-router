@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOpenClawRoutingHint,
   classifyAcademicPlanningIntent,
+  extractAcademicPlanningTerm,
   isExpiredWebviewRefreshRequest,
   shouldAllowClassifierOverride,
 } from "../src/forward/academic-planning-routing.js";
@@ -65,4 +66,13 @@ describe("academic planning routing hints", () => {
       expect(buildOpenClawRoutingHint(message)).toBe("");
     }
   );
+
+  it.each([
+    ["2026년 1학기 시간표 설계", { year: "2026", termCode: "10" }],
+    ["2026학년도 2학기 시간표 짜줘", { year: "2026", termCode: "20" }],
+    ["2026-1 랜덤 시간표", { year: "2026", termCode: "10" }],
+    ["2026/2 시간표", { year: "2026", termCode: "20" }],
+  ])("extracts explicit timetable term: %s", (message, expected) => {
+    expect(extractAcademicPlanningTerm(message)).toEqual(expected);
+  });
 });

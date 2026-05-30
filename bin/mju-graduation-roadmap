@@ -1,0 +1,4 @@
+#!/bin/bash
+# Dedicated command surface for the graduation roadmap webview.
+set -euo pipefail
+exec mju-academic-planning graduation-roadmap "$@"

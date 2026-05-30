@@ -11,6 +11,9 @@ const config: Config = {
   OPENCLAW_GATEWAY_URL: "ws://mjuclaw-agent:18789",
   OPENCLAW_BIN: "openclaw",
   MJU_BIN: "mju",
+  MJU_TIMETABLE_PLANNER_BIN: "mju-timetable-planner",
+  MJU_GRADUATION_ROADMAP_BIN: "mju-graduation-roadmap",
+  ACADEMIC_PLANNING_TIMEOUT_MS: 600_000,
   HTTP_PORT: 3100,
   HTTP_BIND_HOST: "0.0.0.0",
   HTTP_AUTH_TOKEN: "0123456789abcdef",
@@ -55,6 +58,9 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
         raw: {},
       }),
     },
+    academicPlanning: {
+      tryForward: vi.fn().mockResolvedValue({ handled: false }),
+    },
     ...overrides,
   };
 }
@@ -86,18 +92,86 @@ function message(content: string) {
 }
 
 describe("registerMessageHandlers academic-planning guardrails", () => {
-  it("forwards safe timetable planning even when the model classifier returns abuse", async () => {
-    const { deps, handler } = register();
+  it("routes safe timetable planning deterministically even when the model classifier returns abuse", async () => {
+    const { deps, handler } = register(
+      buildDeps({
+        academicPlanning: {
+          tryForward: vi.fn().mockResolvedValue({
+            handled: true,
+            ok: true,
+            intent: "timetable-planner",
+            text: "시간표 설계 웹뷰",
+          }),
+        },
+      })
+    );
     const msg = message("시간표 설계 웹뷰 보여줘");
 
     await handler(msg);
 
-    expect(deps.forwarder.forward).toHaveBeenCalledWith({
+    expect(deps.academicPlanning.tryForward).toHaveBeenCalledWith({
       discordUserId: "415349075274104832",
       message: "시간표 설계 웹뷰 보여줘",
     });
-    expect(msg.reply).toHaveBeenCalledWith("forwarded");
+    expect(deps.forwarder.forward).not.toHaveBeenCalled();
+    expect(msg.reply).toHaveBeenCalledWith("시간표 설계 웹뷰");
     expect(msg.reply).not.toHaveBeenCalledWith(ABUSE_REFUSAL_TEXT);
+  });
+
+  it("keeps current MSI timetable lookup on the OpenClaw path", async () => {
+    const { deps, handler } = register(
+      buildDeps({
+        classifier: {
+          enabled: true,
+          classify: vi.fn().mockResolvedValue({
+            ok: true,
+            result: {
+              final: "general",
+              overriddenToAbuse: false,
+              pAbuse: 0.01,
+              top: [],
+              latencyMs: 3,
+            },
+          }),
+        },
+      })
+    );
+    const msg = message("msi 시간표 보여줘");
+
+    await handler(msg);
+
+    expect(deps.academicPlanning.tryForward).toHaveBeenCalledWith({
+      discordUserId: "415349075274104832",
+      message: "msi 시간표 보여줘",
+    });
+    expect(deps.forwarder.forward).toHaveBeenCalledWith({
+      discordUserId: "415349075274104832",
+      message: "msi 시간표 보여줘",
+    });
+    expect(msg.reply).toHaveBeenCalledWith("forwarded");
+  });
+
+  it("replies with a diagnostic code when deterministic academic planning fails", async () => {
+    const { deps, handler } = register(
+      buildDeps({
+        academicPlanning: {
+          tryForward: vi.fn().mockResolvedValue({
+            handled: true,
+            ok: false,
+            intent: "graduation-roadmap",
+            reason: "academic_planning_view_post_failed",
+          }),
+        },
+      })
+    );
+    const msg = message("졸업로드맵 보여줘");
+
+    await handler(msg);
+
+    expect(deps.forwarder.forward).not.toHaveBeenCalled();
+    expect(msg.reply).toHaveBeenCalledWith(
+      "학사 계획 웹뷰를 여는 중 문제가 생겼어요. 진단 코드: academic_planning_view_post_failed"
+    );
   });
 
   it("keeps heuristic abuse blocking stronger than the academic-planning override", async () => {
