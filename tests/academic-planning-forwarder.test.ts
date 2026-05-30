@@ -252,6 +252,7 @@ describe("AcademicPlanningForwarder", () => {
 
     expect(helper).toContain("classify_grade_history_failure");
     expect(helper).toContain("grade_history_password_change_interstitial_detected");
+    expect(helper).not.toContain('"snapshots" / "msi-main.html"');
     expect(helper).toContain("classify_public_data_failure");
     expect(helper).toContain("academic_planning_db_table_missing");
     expect(helper).toContain("> \"$MJU_NEWS_STDOUT\" 2> \"$MJU_NEWS_STDERR\"");
