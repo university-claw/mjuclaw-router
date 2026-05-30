@@ -128,6 +128,7 @@ classify_grade_history_failure() {
   GRADE_HISTORY_APP_DIR="$app_dir" \
   python3 - <<'PY'
 import os
+import re
 from pathlib import Path
 
 def read(path: str) -> str:
@@ -140,6 +141,13 @@ stdout_text = read(os.environ["GRADE_HISTORY_STDOUT"])
 stderr_text = read(os.environ["GRADE_HISTORY_STDERR"])
 combined = "\n".join([stdout_text, stderr_text])
 lower = combined.lower()
+
+def last_msi_diagnostic() -> str:
+    matches = re.findall(r"\[msi\.([A-Za-z0-9_.-]+)\]", combined)
+    if not matches:
+        return ""
+    detail = re.sub(r"[^A-Za-z0-9_-]+", "_", matches[-1]).strip("_")
+    return f"grade_history_{detail}" if detail else ""
 
 def has_password_change_interstitial() -> bool:
     url_or_code_hit = any(
@@ -165,7 +173,10 @@ def has_password_change_interstitial() -> bool:
     )
     return url_or_code_hit or (password_hit and change_hit)
 
-if has_password_change_interstitial():
+msi_diagnostic = last_msi_diagnostic()
+if msi_diagnostic:
+    print(msi_diagnostic)
+elif has_password_change_interstitial():
     print("grade_history_password_change_interstitial_detected")
 elif "[msi.open_menu.main_context_failed]" in combined:
     print("grade_history_main_context_failed")
