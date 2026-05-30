@@ -138,9 +138,7 @@ def read(path: str) -> str:
 
 stdout_text = read(os.environ["GRADE_HISTORY_STDOUT"])
 stderr_text = read(os.environ["GRADE_HISTORY_STDERR"])
-app_dir = Path(os.environ["GRADE_HISTORY_APP_DIR"])
-main_html = read(str(app_dir / "snapshots" / "msi-main.html"))
-combined = "\n".join([stdout_text, stderr_text, main_html])
+combined = "\n".join([stdout_text, stderr_text])
 lower = combined.lower()
 
 def has_password_change_interstitial() -> bool:
