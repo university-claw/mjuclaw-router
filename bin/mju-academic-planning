@@ -205,6 +205,90 @@ else:
 PY
 }
 
+should_retry_grade_history() {
+  case "$1" in
+    grade_history_login_*|\
+    grade_history_saved_session_*|\
+    grade_history_open_menu_*|\
+    grade_history_password_change_interstitial_detected|\
+    grade_history_main_context_failed|\
+    grade_history_go_body_failed|\
+    grade_history_page_open_failed|\
+    grade_history_unknown_failed)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+classify_msi_session_reset_failure() {
+  local stdout_file="$1"
+  local stderr_file="$2"
+  MSI_SESSION_RESET_STDOUT="$stdout_file" \
+  MSI_SESSION_RESET_STDERR="$stderr_file" \
+  python3 - <<'PY'
+import os
+from pathlib import Path
+
+def read(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="ignore")[:1000000]
+    except Exception:
+        return ""
+
+combined = "\n".join([
+    read(os.environ["MSI_SESSION_RESET_STDOUT"]),
+    read(os.environ["MSI_SESSION_RESET_STDERR"]),
+])
+lower = combined.lower()
+
+if "unknown command" in lower or "invalid command" in lower:
+    print("cli_unsupported")
+elif "permission denied" in lower or "errno 13" in lower:
+    print("permission_denied")
+elif "no space left" in lower or "errno 28" in lower:
+    print("no_space_left")
+elif "42p01" in lower or "does not exist" in lower:
+    print("db_table_missing")
+elif "econnrefused" in lower or "timeout" in lower:
+    print("db_unreachable")
+elif "postgres" in lower or "database" in lower or "pg" in lower:
+    print("db_failed")
+elif "json" in lower:
+    print("json_failed")
+else:
+    print("unknown_failed")
+PY
+}
+
+read_grade_history() {
+  MJU_SKIP_VIEW="$SKIP_VIEW_ENV" \
+    mju --app-dir "$APP_DIR" --format json msi grade-history \
+    > "$GRADE_HISTORY_JSON" 2> "$GRADE_HISTORY_STDERR"
+}
+
+reset_msi_session_for_retry() {
+  local logout_json="$TMP_DIR/msi-session-reset.json"
+  local logout_stderr="$TMP_DIR/msi-session-reset.stderr"
+  local reset_detail
+
+  diag "msi" "grade_history_msi_session_reset_start"
+  if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" \
+    mju --app-dir "$APP_DIR" --format json msi logout \
+    > "$logout_json" 2> "$logout_stderr"; then
+    reset_detail=$(classify_msi_session_reset_failure "$logout_json" "$logout_stderr")
+    diag "msi" "grade_history_msi_session_reset_${reset_detail}"
+    cat "$logout_stderr" >&2 2>/dev/null || true
+    cat "$logout_json" >&2 2>/dev/null || true
+    return 1
+  fi
+
+  diag "msi" "grade_history_msi_session_reset_succeeded"
+  return 0
+}
+
 classify_context_failure() {
   local stderr_file="$1"
   CONTEXT_STDERR="$stderr_file" python3 - <<'PY'
@@ -323,9 +407,38 @@ if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json profi
 fi
 
 diag "msi" "grade_history_read"
-if ! MJU_SKIP_VIEW="$SKIP_VIEW_ENV" mju --app-dir "$APP_DIR" --format json msi grade-history > "$GRADE_HISTORY_JSON" 2> "$GRADE_HISTORY_STDERR"; then
+if ! read_grade_history; then
   DETAIL=$(classify_grade_history_failure "$GRADE_HISTORY_JSON" "$GRADE_HISTORY_STDERR" "$APP_DIR")
   diag "msi" "$DETAIL"
+
+  if should_retry_grade_history "$DETAIL"; then
+    diag "msi" "grade_history_retry_eligible"
+    if reset_msi_session_for_retry; then
+      diag "msi" "grade_history_retry_after_msi_session_reset"
+    else
+      diag "msi" "grade_history_retry_after_msi_session_reset_failed"
+    fi
+    diag "msi" "grade_history_retry_read"
+    if read_grade_history; then
+      diag "msi" "grade_history_retry_succeeded"
+    else
+      RETRY_DETAIL=$(classify_grade_history_failure "$GRADE_HISTORY_JSON" "$GRADE_HISTORY_STDERR" "$APP_DIR")
+      diag "msi" "grade_history_retry_${RETRY_DETAIL}"
+      echo "ERR: failed to read MSI grade history for academic planning after session reset retry" >&2
+      cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
+      cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
+      exit 1
+    fi
+  else
+    echo "ERR: failed to read MSI grade history for academic planning" >&2
+    cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
+    cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
+    exit 1
+  fi
+fi
+
+if [[ ! -s "$GRADE_HISTORY_JSON" ]]; then
+  diag "msi" "grade_history_empty_json"
   echo "ERR: failed to read MSI grade history for academic planning" >&2
   cat "$GRADE_HISTORY_STDERR" >&2 2>/dev/null || true
   cat "$GRADE_HISTORY_JSON" >&2 2>/dev/null || true
