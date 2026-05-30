@@ -254,6 +254,17 @@ describe("AcademicPlanningForwarder", () => {
     expect(helper).toContain("last_msi_diagnostic");
     expect(helper).toContain("grade_history_password_change_interstitial_detected");
     expect(helper).toContain("grade_history_{detail}");
+    expect(helper).toContain("should_retry_grade_history");
+    expect(helper).toContain("grade_history_open_menu_*");
+    expect(helper).toContain("classify_msi_session_reset_failure");
+    expect(helper).toContain("grade_history_retry_eligible");
+    expect(helper).toContain("grade_history_msi_session_reset_start");
+    expect(helper).toContain("mju --app-dir \"$APP_DIR\" --format json msi logout");
+    expect(helper).toContain("grade_history_msi_session_reset_succeeded");
+    expect(helper).toContain("grade_history_retry_after_msi_session_reset");
+    expect(helper).toContain("grade_history_retry_after_msi_session_reset_failed");
+    expect(helper).toContain("grade_history_retry_read");
+    expect(helper).toContain("grade_history_retry_succeeded");
     expect(helper).not.toContain('"snapshots" / "msi-main.html"');
     expect(helper).toContain("classify_public_data_failure");
     expect(helper).toContain("academic_planning_db_table_missing");
