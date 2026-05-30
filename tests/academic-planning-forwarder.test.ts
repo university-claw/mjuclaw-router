@@ -161,7 +161,7 @@ describe("AcademicPlanningForwarder", () => {
       stdout: "",
       stderr: [
         "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_read mode=timetable",
-        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_password_change_interstitial_detected mode=timetable",
+        "ACADEMIC_PLANNING_DIAG stage=msi detail=grade_history_login_password_change_cancel_still_interstitial mode=timetable",
         "ERR: failed to read MSI grade history for academic planning",
       ].join("\n"),
       exitCode: 1,
@@ -177,13 +177,13 @@ describe("AcademicPlanningForwarder", () => {
       handled: true,
       ok: false,
       intent: "timetable-planner",
-      reason: "academic_planning_exit_1.msi.grade_history_password_change_interstitial_detected",
+      reason: "academic_planning_exit_1.msi.grade_history_login_password_change_cancel_still_interstitial",
     });
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({
-        reason: "academic_planning_exit_1.msi.grade_history_password_change_interstitial_detected",
+        reason: "academic_planning_exit_1.msi.grade_history_login_password_change_cancel_still_interstitial",
         helperStage: "msi",
-        helperDetail: "grade_history_password_change_interstitial_detected",
+        helperDetail: "grade_history_login_password_change_cancel_still_interstitial",
         helperMode: "timetable",
       }),
       expect.any(String)
@@ -251,7 +251,9 @@ describe("AcademicPlanningForwarder", () => {
     const helper = await readFile(new URL("../bin/mju-academic-planning", import.meta.url), "utf8");
 
     expect(helper).toContain("classify_grade_history_failure");
+    expect(helper).toContain("last_msi_diagnostic");
     expect(helper).toContain("grade_history_password_change_interstitial_detected");
+    expect(helper).toContain("grade_history_{detail}");
     expect(helper).not.toContain('"snapshots" / "msi-main.html"');
     expect(helper).toContain("classify_public_data_failure");
     expect(helper).toContain("academic_planning_db_table_missing");
