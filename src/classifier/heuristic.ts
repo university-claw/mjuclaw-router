@@ -32,6 +32,34 @@ const PROMPT_OVERRIDE_PHRASES = [
   "개발자 모드로 전환",
 ];
 
+// 짧은 probe 메시지는 "대상 + 동사" 구조가 없어도 내부 상태 탐색 의도가 강하다.
+// 단독 토큰으로 들어온 경우에만 차단해 일반 문장 false positive를 줄인다.
+const BARE_INTERNAL_PROBE_MESSAGES = [
+  "user",
+  "users",
+  "사용자",
+  "유저",
+  "사용자 목록",
+  "유저 목록",
+  "user list",
+  "users list",
+  "user_data",
+  "user_data.profiles",
+  "/data/users",
+  "logic",
+  "로직",
+  "처리 로직",
+  "응답 로직",
+  "라우팅 로직",
+  "분류 로직",
+  "차단 로직",
+  "검열 로직",
+  "router",
+  "라우터",
+  "classifier",
+  "분류기",
+];
+
 const BENIGN_PROMPT_CONTEXTS = [
   "do not ignore",
   "don't ignore",
@@ -581,6 +609,16 @@ export type HeuristicResult = {
 export function matchAbuseHeuristic(text: string): HeuristicResult {
   const lower = normalizeText(text);
 
+  // 0) "users", "로직"처럼 짧은 내부 탐색 토큰만 단독으로 보낸 경우.
+  const bareProbe = findExact(lower, BARE_INTERNAL_PROBE_MESSAGES);
+  if (bareProbe) {
+    return {
+      blocked: true,
+      reason: "bare_internal_probe",
+      matched: bareProbe,
+    };
+  }
+
   // 1) 명확한 prompt override / jailbreak 지시.
   const overridePhrase = findIncluded(lower, PROMPT_OVERRIDE_PHRASES);
   if (overridePhrase && !hasBenignPromptContext(lower)) {
@@ -680,13 +718,17 @@ export function matchAbuseHeuristic(text: string): HeuristicResult {
 }
 
 function normalizeText(text: string): string {
-  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+  return text.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 function findIncluded(text: string, candidates: readonly string[]) {
   return candidates.find((candidate) =>
     text.includes(normalizeText(candidate))
   );
+}
+
+function findExact(text: string, candidates: readonly string[]) {
+  return candidates.find((candidate) => text === normalizeText(candidate));
 }
 
 function findPair(
