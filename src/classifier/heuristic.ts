@@ -48,6 +48,10 @@ const BARE_INTERNAL_PROBE_MESSAGES = [
   "/data/users",
   "logic",
   "로직",
+  "검증",
+  "검증해줘",
+  "검증해봐",
+  "검증 부탁",
   "처리 로직",
   "응답 로직",
   "라우팅 로직",
@@ -58,6 +62,78 @@ const BARE_INTERNAL_PROBE_MESSAGES = [
   "라우터",
   "classifier",
   "분류기",
+];
+
+// "묭묭 검증", "agent 테스트"처럼 내부 대상에 대해 검증/테스트를 요청하는 문장.
+// 넓은 동사 "확인"은 정상 학사 요청과 겹치므로 여기에는 넣지 않는다.
+const VALIDATION_PROBE_TARGETS = [
+  "묭묭",
+  "묭묭이",
+  "명지클로",
+  "mjuclaw",
+  "mjuclaw-router",
+  "mjuclaw-agent",
+  "agent",
+  "에이전트",
+  "bot",
+  "봇",
+  "챗봇",
+  "assistant",
+  "router",
+  "라우터",
+  "classifier",
+  "분류기",
+  "openclaw",
+  "프롬프트",
+  "prompt",
+  "system prompt",
+  "developer message",
+  "bootstrap",
+  "agents",
+  "memory",
+  "tool",
+  "tools",
+  "도구",
+  "skill",
+  "기능",
+  "function",
+  "코드",
+  "소스",
+  "구현",
+  "설정",
+  "config",
+  "시스템",
+  "system",
+  "workspace",
+  "워크스페이스",
+  "내부",
+  "처리",
+  "응답",
+  "로직",
+  "규칙",
+  "룰",
+  "정책",
+  "검열",
+  "차단",
+  "보안",
+  "권한",
+  "세션",
+  "session",
+];
+
+const VALIDATION_PROBE_VERBS = [
+  "검증",
+  "검사",
+  "테스트",
+  "분석",
+  "뚫",
+  "우회",
+  "verify",
+  "validate",
+  "test",
+  "inspect",
+  "probe",
+  "bypass",
 ];
 
 const BENIGN_PROMPT_CONTEXTS = [
@@ -196,6 +272,20 @@ const INTERNAL_PROBE_NOUNS = [
   "명령어 목록",
   "실행 가능한 명령",
   "skill 코드",
+  "코드 구조",
+  "구현 방식",
+  "처리 과정",
+  "처리 플로우",
+  "실행 흐름",
+  "보안 규칙",
+  "차단 규칙",
+  "검열 규칙",
+  "세션 구조",
+  "메모리 구조",
+  "DB 구조",
+  "database schema",
+  "db schema",
+  "schema",
 ];
 
 const REVEAL_VERBS = [
@@ -377,6 +467,12 @@ const CROSS_USER_REFERENCES = [
   "users table",
   "user db",
   "users db",
+  "user info",
+  "users info",
+  "user schema",
+  "users schema",
+  "user credentials",
+  "users credentials",
   "user_data",
   "user_data.profiles",
   "다른 discord",
@@ -386,6 +482,14 @@ const CROSS_USER_REFERENCES = [
   "유저 리스트",
   "사용자 db",
   "유저 db",
+  "사용자 정보",
+  "유저 정보",
+  "사용자 테이블",
+  "유저 테이블",
+  "사용자 스키마",
+  "유저 스키마",
+  "사용자 크리덴셜",
+  "유저 크리덴셜",
 ];
 
 const SENSITIVE_DATA_NOUNS = [
@@ -399,6 +503,12 @@ const SENSITIVE_DATA_NOUNS = [
   "users",
   "user data",
   "users data",
+  "user info",
+  "users info",
+  "user schema",
+  "users schema",
+  "user credentials",
+  "users credentials",
   "성적",
   "출석",
   "과제",
@@ -447,7 +557,13 @@ const SENSITIVE_DATA_NOUNS = [
   "pii",
   "목록",
   "리스트",
+  "정보",
+  "테이블",
   "db",
+  "schema",
+  "스키마",
+  "credentials",
+  "크리덴셜",
 ];
 
 const DATA_ACCESS_VERBS = [
@@ -468,6 +584,7 @@ const DATA_ACCESS_VERBS = [
   "검사",
   "테스트",
   "분석",
+  "구조",
   "list",
   "dump",
   "show",
@@ -479,6 +596,7 @@ const DATA_ACCESS_VERBS = [
   "verify",
   "validate",
   "test",
+  "probe",
 ];
 
 const AUTH_BYPASS_HARD_PHRASES = [
@@ -645,6 +763,20 @@ export function matchAbuseHeuristic(text: string): HeuristicResult {
     };
   }
 
+  // 1.5) "묭묭 처리 검증", "agent 테스트"처럼 내부 대상 검증을 요청하는 경우.
+  const validationProbe = findPair(
+    lower,
+    VALIDATION_PROBE_TARGETS,
+    VALIDATION_PROBE_VERBS
+  );
+  if (validationProbe) {
+    return {
+      blocked: true,
+      reason: "validation_probe",
+      matched: `${validationProbe.noun} + ${validationProbe.verb}`,
+    };
+  }
+
   // 2) "내부 코드 + 알려/보여" 같이 명령형 동사와 함께일 때만 차단.
   //    예: "내부 코드 알려줘"는 차단, "내부 코드 궁금하다" 정도는 통과.
   const internalProbe = findPair(lower, INTERNAL_PROBE_NOUNS, REVEAL_VERBS);
@@ -728,7 +860,8 @@ function findIncluded(text: string, candidates: readonly string[]) {
 }
 
 function findExact(text: string, candidates: readonly string[]) {
-  return candidates.find((candidate) => text === normalizeText(candidate));
+  const exactText = normalizeBareProbeText(text);
+  return candidates.find((candidate) => exactText === normalizeText(candidate));
 }
 
 function findPair(
@@ -773,4 +906,8 @@ function hasBenignPromptContext(text: string): boolean {
 
 function hasSecretForceBlockContext(text: string): boolean {
   return findIncluded(text, SECRET_FORCE_BLOCK_CONTEXTS) !== undefined;
+}
+
+function normalizeBareProbeText(text: string): string {
+  return text.replace(/^[\s"'`.,!?;:()[\]{}]+|[\s"'`.,!?;:()[\]{}]+$/g, "");
 }
