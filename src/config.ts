@@ -4,6 +4,11 @@ const ConfigSchema = z.object({
   DISCORD_BOT_TOKEN: z.string().min(1, "DISCORD_BOT_TOKEN is required"),
   DISCORD_GUILD_ID: z.string().optional(),
   USER_DATA_ROOT: z.string().min(1).default("/data/users"),
+  DISCORD_ATTACHMENT_MAX_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(25 * 1024 * 1024),
   OPENCLAW_GATEWAY_URL: z.string().min(1).default("ws://mjuclaw-agent:18789"),
   OPENCLAW_GATEWAY_TOKEN: z.string().optional(),
   OPENCLAW_BIN: z.string().min(1).default("openclaw"),

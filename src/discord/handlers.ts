@@ -12,6 +12,10 @@ import type { Logger } from "../logger.js";
 import type { OpenClawForwarder } from "../forward/openclaw.js";
 import { buildOnboardingPrompt } from "../onboarding/modal.js";
 import type { OnboardingStatusChecker } from "../onboarding/status.js";
+import {
+  formatAttachmentContext,
+  saveDiscordAttachments,
+} from "./attachments.js";
 import { chunkForDiscord } from "./chunk.js";
 
 export type HandlerDeps = {
@@ -158,10 +162,33 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
         return;
       }
 
+      const rawAttachmentCount = attachmentCount(message);
+      const attachments =
+        rawAttachmentCount > 0
+          ? await saveDiscordAttachments({
+              attachments: message.attachments,
+              config,
+              discordUserId: userId,
+              logger,
+              messageId: message.id,
+            })
+          : [];
+      if (rawAttachmentCount > 0 && attachments.length === 0) {
+        await reply(
+          "첨부파일을 확인했지만 제출에 사용할 수 있게 저장하지 못했어요. 파일 크기를 줄이거나 다시 첨부해 주세요."
+        );
+        return;
+      }
+
+      const attachmentContext = formatAttachmentContext(attachments);
+      const forwardedMessage = [message.content.trim(), attachmentContext]
+        .filter((part) => part.length > 0)
+        .join("\n\n");
+
       // 온보딩 완료 + (필요 시) 분류 통과 사용자 → openclaw로 forward
       const result = await forwarder.forward({
         discordUserId: userId,
-        message: message.content,
+        message: forwardedMessage,
       });
 
       if (!result.ok) {
@@ -192,7 +219,9 @@ export function registerMessageHandlers(client: Client, deps: HandlerDeps) {
 
 function shouldHandle(message: Message, client: Client, config: Config): boolean {
   if (message.author.bot) return false;
-  if (!message.content || message.content.trim().length === 0) return false;
+  const hasContent = message.content.trim().length > 0;
+  const hasAttachments = attachmentCount(message) > 0;
+  if (!hasContent && !hasAttachments) return false;
 
   const channelType = message.channel.type;
   const isDm = channelType === ChannelType.DM;
@@ -210,4 +239,8 @@ function shouldHandle(message: Message, client: Client, config: Config): boolean
     return true;
   }
   return false;
+}
+
+function attachmentCount(message: Message): number {
+  return message.attachments?.size ?? 0;
 }
