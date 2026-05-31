@@ -36,6 +36,7 @@ src/
 ├── discord/
 │   ├── client.ts         discord.js Client 팩토리
 │   ├── handlers.ts       messageCreate → 온보딩 게이트 → forward
+│   ├── attachments.ts    Discord 첨부파일 → 사용자별 app-dir 저장 + forward 컨텍스트
 │   ├── interaction.ts    버튼 클릭 → modal 발사, modal 제출 → mju-login
 │   └── chunk.ts          Discord 2000자 분할
 ├── onboarding/
@@ -48,7 +49,7 @@ src/
 
 ## 환경 변수
 
-`.env.example` 참고. 필수: `DISCORD_BOT_TOKEN`. 권장: `OPENCLAW_GATEWAY_URL`(기본 `ws://mjuclaw-agent:18789`), `OPENCLAW_GATEWAY_TOKEN`, `USER_DATA_ROOT`(기본 `/data/users`).
+`.env.example` 참고. 필수: `DISCORD_BOT_TOKEN`. 권장: `OPENCLAW_GATEWAY_URL`(기본 `ws://mjuclaw-agent:18789`), `OPENCLAW_GATEWAY_TOKEN`, `USER_DATA_ROOT`(기본 `/data/users`). Discord 첨부파일은 `USER_DATA_ROOT/<discord-id>/discord-attachments/<message-id>/`에 저장되며, `DISCORD_ATTACHMENT_MAX_BYTES`로 파일당 최대 크기를 제한한다.
 
 ## 로컬 개발
 
